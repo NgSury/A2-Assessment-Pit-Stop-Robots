@@ -9,3 +9,11 @@
             find car, tyre and nut models on github
             alter scope
                 rather than a race car style pit stop, we have chosen to do a tyre change
+
+    21.09.2026
+        Re-evaluated overall task goal
+        changed final goal to accomodate for task requirements
+
+    27.09.2026
+        Reselected chosen robots to accomodate for new task requirements
+
