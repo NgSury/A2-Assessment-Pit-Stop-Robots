@@ -10,13 +10,13 @@ Purpose:
 Current task:
     Wheel removal and replacement.
 """
+import roboticstoolbox as rtb
 
-
-class FanucLRMate200iD:
+class KawasakiRS007L:
     def __init__(self):
-        self.name = "FANUC LR Mate 200iD"
+        self.name = "Kawasaki RS007"
 
-        self._create_model()
+    def create_DH(self):
+        links = []
 
-    def _create_model(self):
-        pass
+        return links
