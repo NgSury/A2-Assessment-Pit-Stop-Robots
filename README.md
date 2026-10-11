@@ -17,3 +17,8 @@
     27.09.2026
         Reselected chosen robots to accomodate for new task requirements
 
+    11.10.2026
+        Once again reselected chosen robots
+        Lucas has added to Lucas_robot.py
+            Now existing working swift implementation - need to go further with this and implement whole robot
+        
