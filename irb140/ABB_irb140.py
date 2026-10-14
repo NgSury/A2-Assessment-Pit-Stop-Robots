@@ -11,7 +11,7 @@ import spatialgeometry as sg
 from spatialmath import SE3
 from pathlib import Path
 
-MESH_DIR = Path(__file__).resolve().parent / "abb_irb140_support" / "meshes" / "irb140" / "visual"
+MESH_DIR = Path(__file__).resolve().parent / "visual"
 
 ABB_ORANGE = [1.0, 0.43, 0.0, 1.0]
 DARK_GREY = [0.2, 0.2, 0.2, 1.0]
