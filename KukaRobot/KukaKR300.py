@@ -5,6 +5,7 @@
 import roboticstoolbox as rtb
 import numpy as np
 import swift
+from swift import Slider
 import spatialgeometry as sg
 from spatialmath import SE3
 from pathlib import Path
@@ -44,14 +45,39 @@ class KukaKR300:
         self.qr = np.array([0, -np.pi/2, np.pi/2, 0, np.pi/2, 0])
         self.Robot.q = self.qr
 
-robot = KukaKR300()
-print("Kuka KR300 robot model created.")
-q_zero = np.zeros(6)
-pose = robot.Robot.fkine(q_zero)
-env = swift.Swift()
-env.launch(realtime=True)
-env.add(robot.base_mesh)
-env.add(robot.Robot)
-env.step(0.05)
+def move_joint(robot, angle, joint):
+    q = robot.Robot.q.copy()
+    q[joint] = np.deg2rad(float(angle))  # Swift may send the value as a string
+    robot.Robot.q = q
 
-input("Press enter to close")
+
+if __name__ == "__main__":
+    robot = KukaKR300()
+    print("Kuka KR300 robot model created.")
+    q_zero = np.zeros(6)
+    pose = robot.Robot.fkine(q_zero)
+    env = swift.Swift()
+    env.launch(realtime=True)
+    env.add(robot.base_mesh)
+    env.add(robot.Robot)
+    env.step(0.05)
+
+    # One slider per joint (0.1 deg resolution), starting at the robot's current pose
+    for i in range(6):
+        lower, upper = np.rad2deg(robot.Robot.links[i].qlim)
+        env.add(Slider(
+            cb=lambda angle, j=i: move_joint(robot, angle, j),
+            min=float(np.ceil(lower * 10) / 10),   # round inwards so the
+            max=float(np.floor(upper * 10) / 10),  # slider stays within qlim
+            step=0.1,
+            value=round(float(np.rad2deg(robot.Robot.q[i])), 1),
+            desc=f"Joint {i + 1}",
+            unit="deg"
+        ))
+
+    #slider input
+    try:
+        while True:
+            env.step(0.05)
+    except KeyboardInterrupt:
+        pass
