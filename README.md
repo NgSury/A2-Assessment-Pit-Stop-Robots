@@ -21,4 +21,7 @@
         Once again reselected chosen robots
         Lucas has added to Lucas_robot.py
             Now existing working swift implementation - need to go further with this and implement whole robot
+    
+    16.10.2026
+        Added GUI sidebar onto ABB_irb140 (Shlok's robot)
         
