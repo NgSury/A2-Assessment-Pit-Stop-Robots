@@ -5,11 +5,12 @@
 import roboticstoolbox as rtb
 import numpy as np
 import swift
-from swift import Slider
+from swift import Slider, Button
 import spatialgeometry as sg
 from spatialmath import SE3
 from pathlib import Path
 
+#Mesh files
 MESH_DIR = Path(__file__).resolve().parent / "kr300_r2700_2" / "visual"
 KUKA_ORANGE = [1.0, 0.36, 0.0, 1.0]
 DARK_GREY = [0.2, 0.2, 0.2, 1.0]
@@ -63,9 +64,10 @@ if __name__ == "__main__":
     env.step(0.05)
 
     # One slider per joint (0.1 deg resolution), starting at the robot's current pose
+    sliders = []
     for i in range(6):
         lower, upper = np.rad2deg(robot.Robot.links[i].qlim)
-        env.add(Slider(
+        slider = Slider(
             cb=lambda angle, j=i: move_joint(robot, angle, j),
             min=float(np.ceil(lower * 10) / 10),   # round inwards so the
             max=float(np.floor(upper * 10) / 10),  # slider stays within qlim
@@ -73,11 +75,25 @@ if __name__ == "__main__":
             value=round(float(np.rad2deg(robot.Robot.q[i])), 1),
             desc=f"Joint {i + 1}",
             unit="deg"
-        ))
+        )
+        sliders.append(slider)
+        env.add(slider)
+
+    # Reset button: callbacks run inside env.step, so just flag the request
+    # and animate the move from the main loop below
+    reset_requested = [False]
+    env.add(Button(cb=lambda _: reset_requested.__setitem__(0, True), desc="reset"))
 
     #slider input
     try:
         while True:
+            if reset_requested[0]:
+                reset_requested[0] = False
+                for q in rtb.jtraj(robot.Robot.q, robot.qr, 50).q:
+                    robot.Robot.q = q
+                    env.step(0.05)
+                for slider, q in zip(sliders, robot.qr):
+                    slider.value = round(float(np.rad2deg(q)), 1)
             env.step(0.05)
     except KeyboardInterrupt:
         pass
