@@ -63,20 +63,21 @@ class ABBIRB140:
         self.qr = np.zeros(6)
         self.Robot.q = self.qr.copy()
 
-#robot model
-robot = ABBIRB140()
-q_zero = np.zeros(6)
-pose = robot.Robot.fkine(q_zero)
+#robot 
+if __name__== "__main__":
+    robot = ABBIRB140()
+    q_zero = np.zeros(6)
+    pose = robot.Robot.fkine(q_zero)
 
-print("End-effector pose:")
-print(pose)
+    print("End-effector pose:")
+    print(pose)
 
-#env
-env = swift.Swift()
-env.launch(realtime=True)
-env.add(robot.base_mesh)
-env.add(robot.Robot)
-env.step(0.05)
+    #env
+    env = swift.Swift()
+    env.launch(realtime=True)
+    env.add(robot.base_mesh)
+    env.add(robot.Robot)
+    env.step(0.05)
 
 #GUI 
 #move selected robot joint
