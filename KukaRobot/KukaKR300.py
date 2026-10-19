@@ -10,6 +10,7 @@ import spatialgeometry as sg
 from spatialmath import SE3
 from pathlib import Path
 
+#Mesh files
 MESH_DIR = Path(__file__).resolve().parent / "kr300_r2700_2" / "visual"
 KUKA_ORANGE = [1.0, 0.36, 0.0, 1.0]
 DARK_GREY = [0.2, 0.2, 0.2, 1.0]

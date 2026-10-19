@@ -132,8 +132,7 @@ class PitStop:
 
         # Jack fork, wheel gun and wheel gripper
         add_tool(kuka, SE3(0, 0, -KUKA_TOOL_LENGTH) * SE3.Rx(np.pi), [
-            sg.Cuboid([0.12, 0.12, KUKA_TOOL_LENGTH],
-                      pose=SE3(0, 0, -KUKA_TOOL_LENGTH / 2), color=TOOL_GREY),
+            sg.Cuboid([0.12, 0.12, KUKA_TOOL_LENGTH], pose=SE3(0, 0, -KUKA_TOOL_LENGTH / 2), color=TOOL_GREY),
             sg.Cuboid([0.03, 0.3, 0.2], pose=SE3(0, 0, -0.1), color=DARK_GREY)])
         add_tool(abb, SE3(0, 0, ABB_TOOL_LENGTH), [
             sg.Cylinder(0.045, ABB_TOOL_LENGTH - 0.04,
@@ -154,24 +153,20 @@ class PitStop:
         # --- Car, wheels and wheel nut ---
         self.floor = sg.Cuboid([12, 7, 0.01], pose=SE3(0.5, 0, -0.006), color=FLOOR_GREY)
         self.car = sg.Mesh(str(CAR_DIR / "W07.STL"), scale=[MESH_TO_M] * 3, color=CAR_SILVER)
-        self.wheels = {name: sg.Mesh(str(CAR_DIR / "Wheel.STL"), scale=[MESH_TO_M] * 3,
-                                     color=TYRE_BLACK) for name in WHEELS}
+        self.wheels = {name: sg.Mesh(str(CAR_DIR / "Wheel.STL"), scale=[MESH_TO_M] * 3, color=TYRE_BLACK) for name in WHEELS}
         self.nut = sg.Cylinder(NUT_RADIUS, NUT_LENGTH, color=NUT_RED)
         self.new_tyre = sg.Mesh(str(CAR_DIR / "Wheel.STL"), scale=[MESH_TO_M] * 3, color=NEW_TYRE)
 
         # Stand tops: a wheel frame resting there has its inner face down, z up
         lx, ly = lucas.base.t[:2]
-        self.stands = {name: SE3(lx + dx, ly + dy, STAND_HEIGHT)
-                       for name, (dx, dy) in STAND_OFFSETS.items()}
+        self.stands = {name: SE3(lx + dx, ly + dy, STAND_HEIGHT) for name, (dx, dy) in STAND_OFFSETS.items()}
         self.stand_shapes = [sg.Cylinder(STAND_RADIUS, STAND_HEIGHT,
-                                         pose=T * SE3(0, 0, -STAND_HEIGHT / 2), color=STAND_GREY)
-                             for T in self.stands.values()]
+                                         pose=T * SE3(0, 0, -STAND_HEIGHT / 2), color=STAND_GREY) for T in self.stands.values()]
 
         # Each prop follows a parent pose: (parent function, offset)
         self.mounts = {"car": (self.car_pose, CAR_MESH_POSE)}
         for name, (axle, side) in WHEELS.items():
-            self.mounts[name] = (lambda a=axle, s=side: self.car_pose() * hub_pose(a, s),
-                                 WHEEL_MESH_POSE)
+            self.mounts[name] = (lambda a=axle, s=side: self.car_pose() * hub_pose(a, s), WHEEL_MESH_POSE)
         self.mounts["nut"] = (lambda: self.hub_world(WORK_WHEEL), NUT_POSE)
         self.mounts["new_tyre"] = (lambda: self.stands["new"], WHEEL_MESH_POSE)
         self.props = {"car": self.car, "nut": self.nut, "new_tyre": self.new_tyre, **self.wheels}
