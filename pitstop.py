@@ -10,7 +10,6 @@ import roboticstoolbox as rtb
 import swift
 import spatialgeometry as sg
 from spatialmath import SE3
-from pathlib import Path
 from KukaRobot.KukaKR300 import KukaKR300
 from irb140.ABB_irb140 import ABBIRB140
 from Staubli.Lucas_robot import Lucasbot
@@ -20,39 +19,30 @@ from Car.CarModel import CarModel
 dt = 0.02
 steps = 50
 
+# Robot placement.
+Kuka_base_posXY = (3.7, 1.9)
+
+# Lengths of the tools attached to the robots.
+Kuka_toolLength = 0.45
+ARB_toolLength = 0.18
+Lucas_toolLength = 0.10
+
+# Wheel storage stands.
+standHeight = 0.25
+standRadius = 0.3
+standOffset = {
+    "old": (-0.55, -0.1),
+    "new": (-0.1, -0.65)
+}
+
+# Colours.
+tyre_stand_grey = [0.55, 0.55, 0.6, 1.0]
+tool_grey = [0.3, 0.3, 0.3, 1.0] #if stl files for kuka end eff found remove
+dark_grey = [0.2, 0.2, 0.2, 1.0] #if stl files for kuka end eff found remove
+floor_grey = [0.35, 0.35, 0.38, 1.0]
+
 
 # 2. SIMPLE POSITION FUNCTIONS
-
-def mesh_point(point):
-    # Convert a point from the STL coordinates to metres.
-    difference = np.array(point) - car_centre
-    difference = difference * mesh_conv
-    return np.array([difference[0], -difference[2], difference[1]])
-
-
-# The car STL is Y-up. Rotate it into the Swift Z-up world.
-car_mesh_pose = SE3.Rx(np.pi / 2) * SE3(*(-car_centre * mesh_conv))
-wheel_mesh_pose = SE3(
-    -wheel_centre * mesh_conv,
-    -wheel_centre * mesh_conv,
-    0
-)
-nut_pose = SE3(0, 0, nut_seat * mesh_conv + nut_length / 2)
-jack_pose = SE3(mesh_point(car_jackPoint)) * SE3.Ry(-np.pi / 2)
-rear_pivot = mesh_point([car_rearHub_x, car_axel_y, car_centre[2]])
-
-
-def hub_pose(axle, side):
-    # Find the position of a wheel hub on the car.
-    if axle == "front":
-        x = car_frontHub_x
-    else:
-        x = car_rearHub_x
-
-    z = car_centre[2] - side * car_axel_z[axle]
-    position = mesh_point([x, car_axel_y, z])
-    return SE3(position) * SE3.Rx(-side * np.pi / 2)
-
 
 def back(distance):
     # Move backwards along the robot tool's axis.
@@ -81,23 +71,21 @@ class PitStop:
 
     def __init__(self, env):
         self.env = env
-        self.pitch = 0.0
 
-        # Create the three robots.
+        # Create the car and the three robots.
+        self.car = CarModel()
         self.kuka = KukaKR300()
         self.abb = ABBIRB140()
         self.lucas = Lucasbot()
 
+        car = self.car
         kuka = self.kuka.Robot
         abb = self.abb.Robot
         lucas = self.lucas.Robot
 
         # Position the robots around the car.
-        front_hub = hub_pose("front", -1).t
-        jack = jack_pose.t
-        
-        car_centre = CarModel.car_centre
-        
+        front_hub = car.hub_pose("front", -1).t
+        jack = car.jack_offset.t
 
         kuka.base = facing(Kuka_base_posXY[0], Kuka_base_posXY[1], jack)
         abb.base = SE3(front_hub[0] + 0.35, -1.6, 0) * SE3.Rz(np.pi / 2)
@@ -133,7 +121,7 @@ class PitStop:
                 color=tool_grey
             ),
             sg.Cylinder(
-                nut_radius + 0.008, 0.04,
+                car.nut_radius + 0.008, 0.04,
                 pose=SE3(0, 0, -0.02),
                 color=dark_grey
             )
@@ -165,32 +153,11 @@ class PitStop:
         abb.q = self.abb_home.copy()
         lucas.q = self.lucas_home.copy()
 
-        # Create the floor, car, four wheels, nut and replacement wheel.
+        # Create the floor.
         self.floor = sg.Cuboid(
             [12, 7, 0.01],
             pose=SE3(0.5, 0, -0.006),
             color=floor_grey
-        )
-
-        self.car = sg.Mesh(
-            str(car_mod / "W07.STL"),
-            scale=[mesh_conv, mesh_conv, mesh_conv],
-            color=car_silver
-        )
-
-        self.wheels = {}
-        for name in wheels:
-            self.wheels[name] = sg.Mesh(
-                str(car_mod / "Wheel.STL"),
-                scale=[mesh_conv, mesh_conv, mesh_conv],
-                color=tyre_black
-            )
-
-        self.nut = sg.Cylinder(nut_radius, nut_length, color=nut_red)
-        self.new_tyre_red = sg.Mesh(
-            str(car_mod / "Wheel.STL"),
-            scale=[mesh_conv, mesh_conv, mesh_conv],
-            color=new_tyre_red
         )
 
         # Create stands next to the Staubli.
@@ -213,24 +180,21 @@ class PitStop:
             self.stand_shapes.append(stand_shape)
 
         # Store each object's parent and its position relative to that parent.
-        # This replaces the more complicated lambda functions.
         self.mounts = {}
-        self.mounts["car"] = ("car", car_mesh_pose)
+        self.mounts["car"] = ("car", car.body_offset)
 
-        for name in wheels:
-            self.mounts[name] = ("hub_" + name, wheel_mesh_pose)
+        for name in car.wheels:
+            self.mounts[name] = ("hub_" + name, car.wheel_offset)
 
-        self.mounts["nut"] = ("hub_" + work_wheel, nut_pose)
-        self.mounts["new_tyre_red"] = ("stand_new", wheel_mesh_pose)
+        self.mounts["nut"] = ("hub_" + car.work_wheel, car.nut_offset)
+        self.mounts["new_wheel"] = ("stand_new", car.wheel_offset)
 
         self.props = {
-            "car": self.car,
-            "nut": self.nut,
-            "new_tyre_red": self.new_tyre_red
+            "car": car.body,
+            "nut": car.nut,
+            "new_wheel": car.new_wheel
         }
-
-        for name in self.wheels:
-            self.props[name] = self.wheels[name]
+        self.props.update(car.wheel_meshes)
 
         # Add all objects and robots to Swift.
         if self.env is not None:
@@ -253,19 +217,10 @@ class PitStop:
 
     # 4. OBJECT POSITIONS AND ATTACHMENT
 
-    def car_pose(self):
-        # Tilt the car around the rear axle when lifting its front.
-        return SE3(rear_pivot) * SE3.Ry(-self.pitch) * SE3(-rear_pivot)
-
-    def hub_world(self, wheel):
-        # Find the wheel hub's position in the world.
-        axle, side = wheels[wheel]
-        return self.car_pose() * hub_pose(axle, side)
-
     def parent_pose(self, parent):
         # Find the position of whichever object a part is attached to.
         if parent == "car":
-            return self.car_pose()
+            return self.car.pose()
 
         if parent == "stand_old":
             return self.stands["old"]
@@ -285,7 +240,7 @@ class PitStop:
         # For example, "hub_FR" refers to the front-right wheel hub.
         if parent.startswith("hub_"):
             wheel = parent[4:]
-            return self.hub_world(wheel)
+            return self.car.hub_world(wheel)
 
         raise ValueError("Unknown attachment: " + parent)
 
@@ -369,44 +324,23 @@ class PitStop:
         goal[-1] = goal[-1] + angle
         self.move_joint(robot, goal, steps)
 
-    # 6. CAR AND WHEEL TARGETS
-
-    def jack_target(self):
-        return self.car_pose() * jack_pose
+    # 6. LIFTING THE CAR
 
     def set_lift(self, pitch, steps=steps):
         # Slowly lift or lower the car while Kuka follows the jack point.
         kuka = self.kuka.Robot
-        start_pitch = self.pitch
+        start_pitch = self.car.pitch
 
         for angle in np.linspace(start_pitch, pitch, steps):
-            self.pitch = angle
-            kuka.q = self.solve(kuka, self.jack_target(), kuka.q)
+            self.car.pitch = angle
+            kuka.q = self.solve(kuka, self.car.jack_target(), kuka.q)
             self.render()
-
-    def nut_target(self):
-        # Position the ABB wheel gun against the nut.
-        target = self.hub_world(work_wheel) * nut_pose
-        target = target * SE3(0, 0, nut_length / 2)
-        return target * SE3.Rx(np.pi)
-
-    def wheel_target(self):
-        # Position the Staubli gripper against the car's wheel.
-        target = self.hub_world(work_wheel)
-        target = target * SE3(0, 0, wheel_outer_z * mesh_conv)
-        return target * SE3.Rx(np.pi)
-
-    def stand_target(self, stand):
-        # Position the Staubli gripper against a wheel on a stand.
-        target = self.stands[stand]
-        target = target * SE3(0, 0, wheel_outer_z * mesh_conv)
-        return target * SE3.Rx(np.pi)
 
     # 7. PICKING UP AND PUTTING DOWN wheels
 
     def place_on_stand(self, name, stand):
         lucas = self.lucas.Robot
-        target = self.stand_target(stand)
+        target = self.car.wheel_target(self.stands[stand])
 
         # Approach, place the wheel, release it, and move away.
         self.move_to(lucas, target * back(0.2))
@@ -416,7 +350,7 @@ class PitStop:
 
     def pick_from_stand(self, name, stand):
         lucas = self.lucas.Robot
-        target = self.stand_target(stand)
+        target = self.car.wheel_target(self.stands[stand])
 
         # Approach the wheel, grip it, and move away.
         self.move_to(lucas, target * back(0.2))
@@ -427,55 +361,56 @@ class PitStop:
     # 8. RUN THE FULL PIT STOP
 
     def run(self):
+        car = self.car
         kuka = self.kuka.Robot
         abb = self.abb.Robot
         lucas = self.lucas.Robot
 
         # STEP 1: Kuka lifts the front of the car.
         print("Kuka KR300: jacking up the front of the car")
-        self.move_to(kuka, self.jack_target() * back(0.3))
-        self.move_line(kuka, self.jack_target(), 30)
-        self.set_lift(left_pitch)
+        self.move_to(kuka, car.jack_target() * back(0.3))
+        self.move_line(kuka, car.jack_target(), 30)
+        self.set_lift(car.lift_pitch)
 
         # STEP 2: ABB removes the wheel nut.
         print("ABB IRB140: removing the wheel nut")
-        self.move_to(abb, self.nut_target() * back(0.15))
-        self.move_line(abb, self.nut_target(), 30)
+        self.move_to(abb, car.nut_target() * back(0.15))
+        self.move_line(abb, car.nut_target(), 30)
         self.attach("nut", "abb")
         self.spin_tool(abb, -2 * np.pi)
-        self.move_line(abb, self.nut_target() * back(0.2), 30)
+        self.move_line(abb, car.nut_target() * back(0.2), 30)
         self.move_joint(abb, self.abb_home)
 
         # STEP 3: Staubli removes the old wheel.
         print("Staubli TX90: removing the old wheel")
-        self.move_to(lucas, self.wheel_target() * back(0.15))
-        self.move_line(lucas, self.wheel_target(), 30)
-        self.attach(work_wheel, "lucas")
-        self.move_line(lucas, self.wheel_target() * back(0.3))
-        self.place_on_stand(work_wheel, "old")
+        self.move_to(lucas, car.wheel_target() * back(0.15))
+        self.move_line(lucas, car.wheel_target(), 30)
+        self.attach(car.work_wheel, "lucas")
+        self.move_line(lucas, car.wheel_target() * back(0.3))
+        self.place_on_stand(car.work_wheel, "old")
 
         # STEP 4: Staubli picks up and fits the new wheel.
         print("Staubli TX90: fitting the new tyre")
-        self.pick_from_stand("new_tyre_red", "new")
-        self.move_to(lucas, self.wheel_target() * back(0.3))
-        self.move_line(lucas, self.wheel_target())
-        self.attach("new_tyre_red", "hub_" + work_wheel)
-        self.move_line(lucas, self.wheel_target() * back(0.15), 30)
+        self.pick_from_stand("new_wheel", "new")
+        self.move_to(lucas, car.wheel_target() * back(0.3))
+        self.move_line(lucas, car.wheel_target())
+        self.attach("new_wheel", "hub_" + car.work_wheel)
+        self.move_line(lucas, car.wheel_target() * back(0.15), 30)
         self.move_joint(lucas, self.lucas_home)
 
         # STEP 5: ABB refits the wheel nut.
         print("ABB IRB140: refitting the wheel nut")
-        self.move_to(abb, self.nut_target() * back(0.2))
-        self.move_line(abb, self.nut_target(), 30)
+        self.move_to(abb, car.nut_target() * back(0.2))
+        self.move_line(abb, car.nut_target(), 30)
         self.spin_tool(abb, 2 * np.pi)
-        self.attach("nut", "hub_" + work_wheel)
-        self.move_line(abb, self.nut_target() * back(0.15), 30)
+        self.attach("nut", "hub_" + car.work_wheel)
+        self.move_line(abb, car.nut_target() * back(0.15), 30)
         self.move_joint(abb, self.abb_home)
 
         # STEP 6: Kuka lowers the car.
         print("Kuka KR300: lowering the car")
         self.set_lift(0.0)
-        self.move_line(kuka, self.jack_target() * back(0.3), 30)
+        self.move_line(kuka, car.jack_target() * back(0.3), 30)
         self.move_joint(kuka, self.kuka_home)
 
         print("Pit stop complete")
