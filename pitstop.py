@@ -196,6 +196,9 @@ class PitStop:
         }
         self.props.update(car.wheel_meshes)
 
+        # Place every object before adding it, so nothing appears at the origin.
+        self.update_props()
+
         # Add all objects and robots to Swift.
         if self.env is not None:
             self.env.add(self.floor)
@@ -256,10 +259,13 @@ class PitStop:
         offset = new_position.inv() * old_position
         self.mounts[name] = (new_parent, offset)
 
-    def render(self):
+    def update_props(self):
         # Move all objects to match the latest robot and car positions.
         for name in self.props:
             self.props[name].T = self.prop_pose(name).A
+
+    def render(self):
+        self.update_props()
 
         if self.env is not None:
             self.env.step(dt)
