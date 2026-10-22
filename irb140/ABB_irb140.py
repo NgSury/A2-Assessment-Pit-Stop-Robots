@@ -21,6 +21,12 @@ DARK_GREY = [0.2, 0.2, 0.2, 1.0]
 Q_MESH = np.zeros(6)
 MESH_SCALE = [0.01, 0.01, 0.01]
 
+# 19 mm socket STL (mm): square drive end at z=0, hex pocket floor at z=56, open end at z=78.
+# Scaled up to 100 mm across the flats to match the wheel nut (CarModel.nut_size_up).
+SOCKET_SIZE_UP = 100 / 19
+SOCKET_SCALE = 0.001 * SOCKET_SIZE_UP
+SOCKET_POCKET_Z = 0.056 * SOCKET_SIZE_UP
+
 
 # 2. load stl meshes
 
@@ -97,12 +103,16 @@ class ABBIRB140:
         attachment = sg.Mesh(
             str(attachment_path),
             pose=SE3(),
-            scale=[0.001, 0.001, 0.001],
+            scale=[SOCKET_SCALE] * 3,
             color=DARK_GREY
         )
 
         # include the socket as link 6 geometry so it follows every joint movement.
         self.Robot.links[5].geometry = list(self.Robot.links[5].geometry) + [attachment]
+
+        # tool point at the floor of the hex pocket, so a target on the nut's outer face
+        # slides the socket fully over the nut.
+        self.Robot.tool = SE3(0, 0, SOCKET_POCKET_Z)
 
         self.base_mesh = mesh(
             "base_link",

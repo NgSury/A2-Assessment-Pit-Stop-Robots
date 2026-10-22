@@ -12,7 +12,7 @@ import spatialgeometry as sg
 from spatialmath import SE3
 from KukaRobot.KukaKR300 import KukaKR300
 from irb140.ABB_irb140 import ABBIRB140
-from Staubli.Lucas_robot import Lucasbot
+from Staubli.Lucas_robot import Staubli
 from Car.CarModel import CarModel
 
 # Simulation speed.
@@ -75,7 +75,7 @@ class PitStop:
         self.car = CarModel()
         self.kuka = KukaKR300()
         self.abb = ABBIRB140()
-        self.lucas = Lucasbot()
+        self.lucas = Staubli()
 
         car = self.car
         kuka = self.kuka.Robot
@@ -95,22 +95,6 @@ class PitStop:
         self.abb.base_mesh.T = abb.base.A
         self.lucas.base_mesh.T = lucas.base.A
 
-
-        # Add a wheel-nut tool to the ABB.
-        abb_tool = SE3(0, 0, ARB_toolLength)
-        abb_shapes = [
-            sg.Cylinder(
-                0.045, ARB_toolLength - 0.04,
-                pose=SE3(0, 0, -(ARB_toolLength + 0.04) / 2),
-                color=tool_grey
-            ),
-            sg.Cylinder(
-                car.nut_radius + 0.008, 0.04,
-                pose=SE3(0, 0, -0.02),
-                color=dark_grey
-            )
-        ]
-        add_tool(abb, abb_tool, abb_shapes)
 
         # Add a wheel gripper to the Staubli.
         lucas_tool = SE3(0, 0, Lucas_toolLength)
