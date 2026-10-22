@@ -14,6 +14,7 @@ from KukaRobot.KukaKR300 import KukaKR300
 from irb140.ABB_irb140 import ABBIRB140
 from Staubli.Lucas_robot import Staubli
 from Car.CarModel import CarModel
+from UR3e.UR3e_robot import UR3eLollipop
 
 # Simulation speed.
 dt = 0.02
@@ -63,6 +64,7 @@ class PitStop:
         self.kuka = KukaKR300()
         self.abb = ABBIRB140()
         self.lucas = Staubli()
+        self.ur3e = UR3eLollipop()
 
         car = self.car
         kuka = self.kuka.Robot
@@ -76,6 +78,16 @@ class PitStop:
         kuka.base = facing(Kuka_base_posXY[0], Kuka_base_posXY[1], jack)
         abb.base = SE3(front_hub[0] + 0.35, -1.6, 0) * SE3.Rz(np.pi / 2)
         lucas.base = SE3(front_hub[0] - 0.7, -1.75, 0) * SE3.Rz(np.pi / 2)
+
+        # UR3e stands beside the nose, away from the car's driving line.
+        self.ur3e.set_base(SE3(3.16, 1.16, 0.62))
+        # Approximate full-car clearance box, in metres.
+        car_min_x = car.mesh_point([0, 0, car.centre[2]])[0]
+        car_max_x = car.mesh_point([299.2, 0, car.centre[2]])[0]
+        self.ur3e_car_box = (
+            np.array([(car_min_x + car_max_x) / 2, 0, 0.58]),
+            np.array([car_max_x - car_min_x, 1.90, 1.16])
+        )
 
         # Move the base meshes into the same positions.
         self.kuka.base_mesh.T = kuka.base.A
@@ -154,6 +166,7 @@ class PitStop:
             self.env.add(kuka)
             self.env.add(abb)
             self.env.add(lucas)
+            self.ur3e.add_to_env(self.env)
 
         self.render()
 
@@ -205,9 +218,20 @@ class PitStop:
 
     def render(self):
         self.update_props()
+        self.ur3e.update()
 
         if self.env is not None:
             self.env.step(dt)
+
+    def move_lollipop(self, target):
+        # Check clearance before moving the UR3e through its joint path.
+        path = self.ur3e.checked_path(
+            target, self.ur3e_car_box,
+            (self.kuka.Robot, self.abb.Robot, self.lucas.Robot)
+        )
+        for q in path:
+            self.ur3e.q = q.copy()
+            self.render()
 
     # 5. ROBOT MOVEMENT
 
@@ -311,6 +335,10 @@ class PitStop:
         abb = self.abb.Robot
         lucas = self.lucas.Robot
 
+        # UR3e extends the lollipop in front of the car before the tyre change.
+        print("UR3e: holding the lollipop in front of the car")
+        self.move_lollipop(self.ur3e.q_hold)
+
         # STEP 1: Kuka lifts the front of the car.
         print("Kuka KR300: jacking up the front of the car")
         self.move_to(kuka, car.jack_target() * back(0.3))
@@ -351,6 +379,10 @@ class PitStop:
         self.attach("nut", "hub_" + car.work_wheel)
         self.move_line(abb, car.nut_target() * back(0.15), 30)
         self.move_joint(abb, self.abb_home)
+
+        # The wheel change is complete; raise the lollipop before car release.
+        print("UR3e: raising the lollipop out of the car's path")
+        self.move_lollipop(self.ur3e.q_home)
 
         # STEP 6: Kuka lowers the car.
         print("Kuka KR300: lowering the car")

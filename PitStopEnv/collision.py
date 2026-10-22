@@ -32,7 +32,7 @@ def is_intersection_inside (intersect_p, triangle_verts):
     
     D = uv*uv - uu*vv
     
-    s = (uv*wv - uu*wv)/D
+    s = (uv*wv - vv*wu)/D
     if s < 0 or s >1:
         return False
     
@@ -88,7 +88,7 @@ def below_floor(robot, q, floor_z = -.005):
             np.array([0,0,1]), np.array([ 0,0, floor_z]), points[i], points [i+1])
         if check ==1:
             return True
-        return False
+    return False
 
 def link_boxes(points, mover_points, thickness = .15):
     mover_points = np.array(mover_points)
@@ -136,13 +136,13 @@ class collision_manager:
             vertices, faces, normals = rectangular_prism(size, pose)
             if links_cross_mesh(points, faces, vertices, normals):
                 return True, name
-        for other in self.robot:
+        for other in self.robots:
             if other is robot:
                 continue
             other_points = get_link_points(other, other.q)
-            for mover_points, boxes in ((points, link_boxes(other_points, points)),(other_points, link_boxes(points, other))):
+            for mover_points, boxes in ((points, link_boxes(other_points, points)),(other_points, link_boxes(points, other_points))):
                 for pose, size in boxes:
-                    vertices, faces, normals, rectangular_prism(size, pose)
+                    vertices, faces, normals = rectangular_prism(size, pose)
                     if links_cross_mesh(mover_points, faces, vertices, normals):
                         return True, other.name
         return False, None
@@ -150,6 +150,10 @@ class collision_manager:
     def path_clear(self, robot, path, obstacle_pose, obstacle_size):
         for q in path:
             hit, name = self.check(robot, obstacle_pose, obstacle_size, q)
+            if hit:
+                self.reason = name
+                return False
+        return True
 
 
     def random_obstacle_pose(self, robot, path, obstacle_size, keep_clear=(), others=(), rng=None):
