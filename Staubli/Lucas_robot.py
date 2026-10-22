@@ -15,10 +15,23 @@ Collision_dir = Robot_dir / "assets" / "staubli" / "tx90" / "collision"
 
 Staubli_grey = [0.75, 0.75, 0.75, 1.0]
 Dark_grey = [0.2, 0.2, 0.2, 1.0]
+Lucas_toolLength = 0.10
+tool_grey = [0.3, 0.3, 0.3, 1.0]
+dark_grey = [0.2, 0.2, 0.2, 1.0]
 
 
 def mesh(name, pose=SE3(), color=Staubli_grey):
     return [sg.Mesh(str(Visual_dir / f"{name}.stl"), pose=pose, color=color)]
+
+
+def add_tool(robot, tool_pose, shapes):
+    # Set the tool position and attach its visual parts.
+    robot.tool = tool_pose
+
+    for shape in shapes:
+        shape.T = (tool_pose * SE3(shape.T)).A
+
+    robot.links[-1].geometry = list(robot.links[-1].geometry) + shapes
 
 
 def stl_bounds(path):
@@ -77,6 +90,22 @@ class Staubli:
 
         for i, link in enumerate(self.Robot.links):
             link.geometry = mesh(f"link_{i + 1}", self.mesh_offsets[i])
+
+        # Add wheel gripper 
+        lucas_tool = SE3(0, 0, Lucas_toolLength)
+        lucas_shapes = [
+            sg.Cylinder(
+                0.035, Lucas_toolLength,
+                pose=SE3(0, 0, -Lucas_toolLength / 2),
+                color=tool_grey
+            ),
+            sg.Cylinder(
+                0.14, 0.02,
+                pose=SE3(0, 0, -0.01),
+                color=dark_grey
+            )
+        ]
+        add_tool(self.Robot, lucas_tool, lucas_shapes)
 
         self.base_mesh = mesh("base_link", self.Robot.base, Dark_grey)[0]
         self.qr = np.zeros(6)

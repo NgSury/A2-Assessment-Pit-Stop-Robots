@@ -24,7 +24,6 @@ Kuka_base_posXY = (3.7, 1.9)
 
 # Lengths of the tools attached to the robots.
 ARB_toolLength = 0.18
-Lucas_toolLength = 0.10
 
 # Wheel storage stands.
 standHeight = 0.25
@@ -36,8 +35,6 @@ standOffset = {
 
 # Colours.
 tyre_stand_grey = [0.55, 0.55, 0.6, 1.0]
-tool_grey = [0.3, 0.3, 0.3, 1.0]
-dark_grey = [0.2, 0.2, 0.2, 1.0]
 floor_grey = [0.35, 0.35, 0.38, 1.0]
 
 
@@ -52,16 +49,6 @@ def facing(x, y, target):
     # Rotate a robot base so it faces a target point.
     angle = np.arctan2(target[1] - y, target[0] - x)
     return SE3(x, y, 0) * SE3.Rz(angle)
-
-
-def add_tool(robot, tool_pose, shapes):
-    # Set the tool position and attach its visual parts.
-    robot.tool = tool_pose
-
-    for shape in shapes:
-        shape.T = (tool_pose * SE3(shape.T)).A
-
-    robot.links[-1].geometry = list(robot.links[-1].geometry) + shapes
 
 
 # 3. CREATE THE PIT STOP
@@ -95,22 +82,6 @@ class PitStop:
         self.abb.base_mesh.T = abb.base.A
         self.lucas.base_mesh.T = lucas.base.A
 
-
-        # Add a wheel gripper to the Staubli.
-        lucas_tool = SE3(0, 0, Lucas_toolLength)
-        lucas_shapes = [
-            sg.Cylinder(
-                0.035, Lucas_toolLength,
-                pose=SE3(0, 0, -Lucas_toolLength / 2),
-                color=tool_grey
-            ),
-            sg.Cylinder(
-                0.14, 0.02,
-                pose=SE3(0, 0, -0.01),
-                color=dark_grey
-            )
-        ]
-        add_tool(lucas, lucas_tool, lucas_shapes)
 
         # Starting positions of the robots.
         self.kuka_home = self.kuka.qr.copy()
