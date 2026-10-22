@@ -6,7 +6,7 @@ import numpy as np
 
 
 class CarModel:
-    # Folder containing W07.STL and Wheel.STL
+    # Folder containing W07.STL, Wheel.STL and WheelNut.STL
     folder = Path(__file__).resolve().parent
 
     # Change STL dimensions to metres.
@@ -25,8 +25,14 @@ class CarModel:
     wheel_centre = 19.5
     nut_seat = 22.0
     wheel_outer_z = 23.0
-    nut_length = 0.06
-    nut_radius = 0.04
+    # Wheel nut mesh (WheelNut.STL, M12x1.5 19 mm hex): drawn in mm, axis along +Z,
+    # base face at z=0, 25 mm long, 22 mm across the corners.
+    # Scaled up so the hex is 100 mm across the flats and easy to see in the sim.
+    # The ABB socket uses the same size_up so it still fits.
+    nut_size_up = 100 / 19
+    nut_scale = 0.001 * nut_size_up
+    nut_length = 0.025 * nut_size_up
+    nut_radius = 0.011 * nut_size_up
 
     # Colours.
     silver = [0.75, 0.77, 0.80, 1.0]
@@ -57,14 +63,15 @@ class CarModel:
             -self.wheel_centre * self.mesh_conv,
             0
         )
-        self.nut_offset = SE3(0, 0, self.nut_seat * self.mesh_conv + self.nut_length / 2)
+        # The nut mesh origin is its base face, so it sits straight on the nut seat.
+        self.nut_offset = SE3(0, 0, self.nut_seat * self.mesh_conv)
         self.jack_offset = SE3(self.mesh_point(self.jackPoint)) * SE3.Ry(-np.pi / 2)
         self.rear_pivot = self.mesh_point([self.rearHub_x, self.axel_y, self.centre[2]])
 
         # Meshes: body, four wheels, the work wheel's nut and the replacement wheel.
         self.body = self.make_mesh("W07.STL", self.silver)
         self.wheel_meshes = {name: self.make_mesh("Wheel.STL", self.tyre_black) for name in self.wheels}
-        self.nut = sg.Cylinder(self.nut_radius, self.nut_length, color=self.nut_red)
+        self.nut = sg.Mesh(str(self.folder / "WheelNut.STL"), scale=[self.nut_scale] * 3, color=self.nut_red)
         self.new_wheel = self.make_mesh("Wheel.STL", self.new_tyre_red)
 
     def make_mesh(self, filename, color):
@@ -98,7 +105,7 @@ class CarModel:
     def nut_target(self):
         # Pose for a tool pressed against the work wheel's nut.
         target = self.hub_world(self.work_wheel) * self.nut_offset
-        return target * SE3(0, 0, self.nut_length / 2) * SE3.Rx(np.pi)
+        return target * SE3(0, 0, self.nut_length) * SE3.Rx(np.pi)
 
     def wheel_target(self, hub=None):
         # Pose for a gripper against the outer face of a wheel on a hub (or any frame).
