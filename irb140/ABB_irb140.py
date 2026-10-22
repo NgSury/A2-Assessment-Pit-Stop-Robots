@@ -1,5 +1,5 @@
 # abb irb140
-# purpose: remove the wheel after the car has been elevated.
+# removes the wheel after the car has been elevated.
 # this file can be imported by pitstop.py or run on its own.
 
 import roboticstoolbox as rtb
@@ -21,56 +21,25 @@ DARK_GREY = [0.2, 0.2, 0.2, 1.0]
 Q_MESH = np.zeros(6)
 MESH_SCALE = [0.01, 0.01, 0.01]
 
-
-# 2. load stl meshes
-
+#load stl meshes
 def mesh(name, pose=SE3(), color=ABB_ORANGE):
     path = MESH_DIR / (name + ".stl")
 
     if not path.exists():
         raise FileNotFoundError(f"Mesh not found: {path}")
+    return [sg.Mesh(str(path), pose=pose, scale=MESH_SCALE, color=color)]
 
-    return [sg.Mesh(
-        str(path),
-        pose=pose,
-        scale=MESH_SCALE,
-        color=color
-    )]
-
-
-# 3. create abb irb140 robot
-
+#create abb irb140 robot
 class ABBIRB140:
-
     def __init__(self):
         # original dh link dimensions and joint limits.
-        # joint 2 offset is retained from the earlier gui code.
         links = [
-            rtb.RevoluteDH(
-                d=0.352, a=0.070, alpha=-np.pi / 2,
-                qlim=np.deg2rad([-180, 180])
-            ),
-            rtb.RevoluteDH(
-                d=0, a=0.360, alpha=0,
-                offset=-np.pi / 2,
-                qlim=np.deg2rad([-100, 100])
-            ),
-            rtb.RevoluteDH(
-                d=0, a=0, alpha=-np.pi / 2,
-                qlim=np.deg2rad([-220, 60])
-            ),
-            rtb.RevoluteDH(
-                d=0.380, a=0, alpha=np.pi / 2,
-                qlim=np.deg2rad([-200, 200])
-            ),
-            rtb.RevoluteDH(
-                d=0, a=0, alpha=-np.pi / 2,
-                qlim=np.deg2rad([-120, 120])
-            ),
-            rtb.RevoluteDH(
-                d=0.065, a=0, alpha=0,
-                qlim=np.deg2rad([-400, 400])
-            )
+            rtb.RevoluteDH(d=0.352, a=0.070, alpha=-np.pi / 2, qlim=np.deg2rad([-180, 180])),
+            rtb.RevoluteDH(d=0, a=0.360, alpha=0, offset=-np.pi / 2, qlim=np.deg2rad([-100, 100])),
+            rtb.RevoluteDH(d=0, a=0, alpha=-np.pi / 2, qlim=np.deg2rad([-220, 60])),
+            rtb.RevoluteDH(d=0.380, a=0, alpha=np.pi / 2, qlim=np.deg2rad([-200, 200])),
+            rtb.RevoluteDH(d=0, a=0, alpha=-np.pi / 2, qlim=np.deg2rad([-120, 120])),
+            rtb.RevoluteDH(d=0.065, a=0, alpha=0, qlim=np.deg2rad([-400, 400]))
         ]
 
         self.Robot = rtb.DHRobot(links, name="ABB IRB140")
@@ -93,16 +62,21 @@ class ABBIRB140:
         # attach the 19mm impact socket directly to joint 6.
         attachment_path = Path(__file__).resolve().parent / "Facom_NS19LA_19mm_socket.stl"
 
-        #joint 6's local z axis is the outward wrist axis
+        # joint 6's local z axis is the outward wrist axis.
+        # the stl is drawn in mm with the nut end at z=0 and the drive end at z=78 mm,
+        # so Rx(pi) at the tip puts the nut end at the tool tip and the drive end on the link.
+        socket_length = 0.078
         attachment = sg.Mesh(
             str(attachment_path),
-            pose=SE3(),
+            pose=SE3(0, 0, socket_length) * SE3.Rx(np.pi),
             scale=[0.001, 0.001, 0.001],
             color=DARK_GREY
         )
 
         # include the socket as link 6 geometry so it follows every joint movement.
         self.Robot.links[5].geometry = list(self.Robot.links[5].geometry) + [attachment]
+        # tool frame at the socket's nut end, z pointing out of the flange.
+        self.Robot.tool = SE3(0, 0, socket_length)
 
         self.base_mesh = mesh(
             "base_link",
@@ -113,9 +87,7 @@ class ABBIRB140:
         self.qr = np.zeros(6)
         self.Robot.q = self.qr.copy()
 
-
 #standalone swift gui
-
 def main():
     robot = ABBIRB140()
 
@@ -130,7 +102,6 @@ def main():
     env.step(0.05)
 
     # 5. gui sliders
-
     returning_home = False
 
     def move_joint(angle, joint):
@@ -159,14 +130,7 @@ def main():
     def move_joint6(angle):
         move_joint(angle, 5)
 
-    joint_functions = [
-        move_joint1,
-        move_joint2,
-        move_joint3,
-        move_joint4,
-        move_joint5,
-        move_joint6
-    ]
+    joint_functions = [move_joint1, move_joint2, move_joint3, move_joint4, move_joint5, move_joint6]
 
     sliders = []
 
@@ -189,7 +153,7 @@ def main():
     # 6. smooth return to home
 
     RETURN_SPEED = 15    # degrees per second
-    STEP_TIME = 0.05    # seconds per simulation step
+    STEP_TIME = 0.1    # seconds per step
 
     def return_home(value=None):
         nonlocal returning_home
@@ -202,7 +166,6 @@ def main():
     env.add(home_button)
 
     # 7. camera and simulation
-
     env.set_camera_pose(
         [1.4, -1.8, 1.3],
         [0.15, 0, 0.45]
@@ -226,22 +189,16 @@ def main():
                         q[i] = 0
 
                 robot.Robot.q = q
-
                 if all_home:
                     returning_home = False
                     for slider in sliders:
                         slider.value = 0
-                    print("Robot returned to initial position.")
-
             env.step(STEP_TIME)
 
     except KeyboardInterrupt:
         pass
-
     input("Press enter to close")
 
-
 # 8. run the standalone gui only when directly executed
-
 if __name__ == "__main__":
     main()
