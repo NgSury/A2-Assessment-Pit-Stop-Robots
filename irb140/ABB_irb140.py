@@ -1,6 +1,6 @@
-# ABB IRB140
-# Purpose: Remove the wheel after the car has been elevated.
-# This file can be imported by pitstop.py or run on its own.
+# abb irb140
+# purpose: remove the wheel after the car has been elevated.
+# this file can be imported by pitstop.py or run on its own.
 
 import roboticstoolbox as rtb
 import numpy as np
@@ -11,7 +11,7 @@ from pathlib import Path
 from swift import Slider, Button, Label
 
 
-# 1. MESH FILE LOCATION
+# 1. mesh file location
 
 MESH_DIR = Path(__file__).resolve().parent / "visual"
 
@@ -22,7 +22,7 @@ Q_MESH = np.zeros(6)
 MESH_SCALE = [0.01, 0.01, 0.01]
 
 
-# 2. LOAD STL MESHES
+# 2. load stl meshes
 
 def mesh(name, pose=SE3(), color=ABB_ORANGE):
     path = MESH_DIR / (name + ".stl")
@@ -38,13 +38,13 @@ def mesh(name, pose=SE3(), color=ABB_ORANGE):
     )]
 
 
-# 3. CREATE ABB IRB140 ROBOT
+# 3. create abb irb140 robot
 
 class ABBIRB140:
 
     def __init__(self):
-        # Original DH link dimensions and joint limits.
-        # Joint 2 offset is retained from the earlier GUI code.
+        # original dh link dimensions and joint limits.
+        # joint 2 offset is retained from the earlier gui code.
         links = [
             rtb.RevoluteDH(
                 d=0.352, a=0.070, alpha=-np.pi / 2,
@@ -75,7 +75,7 @@ class ABBIRB140:
 
         self.Robot = rtb.DHRobot(links, name="ABB IRB140")
 
-        # Attach meshes in the correct link coordinate frames.
+        # attach meshes in the correct link coordinate frames.
         T_mesh = self.Robot.fkine_all(Q_MESH)
 
         for i, link in enumerate(self.Robot.links):
@@ -90,6 +90,20 @@ class ABBIRB140:
                 color
             )
 
+        # attach the 19mm impact socket directly to joint 6.
+        attachment_path = Path(__file__).resolve().parent / "Facom_NS19LA_19mm_socket_SIMULATION.stl"
+
+        #joint 6's local z axis is the outward wrist axis
+        attachment = sg.Mesh(
+            str(attachment_path),
+            pose=SE3(),
+            scale=[0.001, 0.001, 0.001],
+            color=DARK_GREY
+        )
+
+        # include the socket as link 6 geometry so it follows every joint movement.
+        self.Robot.links[5].geometry = list(self.Robot.links[5].geometry) + [attachment]
+
         self.base_mesh = mesh(
             "base_link",
             self.Robot.base,
@@ -100,9 +114,7 @@ class ABBIRB140:
         self.Robot.q = self.qr.copy()
 
 
-# 4. STANDALONE SWIFT GUI
-# This function only runs when this file is started directly.
-# Importing ABBIRB140 from pitstop.py will NOT open a second GUI.
+#standalone swift gui
 
 def main():
     robot = ABBIRB140()
@@ -117,7 +129,7 @@ def main():
     env.add(robot.Robot)
     env.step(0.05)
 
-    # 5. GUI SLIDERS
+    # 5. gui sliders
 
     returning_home = False
 
@@ -174,10 +186,10 @@ def main():
         env.add(slider)
         sliders.append(slider)
 
-    # 6. SMOOTH RETURN TO HOME
+    # 6. smooth return to home
 
-    RETURN_SPEED = 15    # Degrees per second
-    STEP_TIME = 0.05    # Seconds per simulation step
+    RETURN_SPEED = 15    # degrees per second
+    STEP_TIME = 0.05    # seconds per simulation step
 
     def return_home(value=None):
         nonlocal returning_home
@@ -189,7 +201,7 @@ def main():
     )
     env.add(home_button)
 
-    # 7. CAMERA AND SIMULATION
+    # 7. camera and simulation
 
     env.set_camera_pose(
         [1.4, -1.8, 1.3],
@@ -229,7 +241,7 @@ def main():
     input("Press enter to close")
 
 
-# 8. RUN THE STANDALONE GUI ONLY WHEN DIRECTLY EXECUTED
+# 8. run the standalone gui only when directly executed
 
 if __name__ == "__main__":
     main()
