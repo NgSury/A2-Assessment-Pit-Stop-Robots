@@ -12,6 +12,7 @@ from pathlib import Path
 
 #Mesh files
 mech_loc = Path(__file__).resolve().parent / "kr300_r2700_2" / "visual"
+coll_loc = Path(__file__).resolve().parent / "kr300_r2700_2" / "collision"
 kuka_orange = [1.0, 0.36, 0.0, 1.0]
 dark_grey = [0.2, 0.2, 0.2, 1.0]
 lift_colour = [0.3, 0.3, 0.3, 1.0]
@@ -23,6 +24,16 @@ lifter_stl = Path(__file__).resolve().parent / "front_wing_lifter_ASSEMBLED.stl"
 lifter_scale = 0.001
 lifter_flange_z = 0.450
 
+# Lifter collision boxes in the lifter STL frame (mm): (x min, x max, y min, y max, z min, z max)
+# simplified representation of the lifter for collision checking
+lifter_boxes = [
+    (-110, 110, -110, 110, -450, -424.5),  # mounting flange
+    (-100, 0, -60, 60, -424.5, -390),      # gusset
+    (-90, -20, -40, 40, -390, -130),       # post
+    (-91, 6, -70, 70, -130, -50),          # bracket
+    (-38, 0, -225, 225, -90, 90),          # paddle
+]
+
 #flipping the lifter to match the robot's flange orientation
 flange = SE3.Rx(np.pi)
 
@@ -31,6 +42,21 @@ def mesh(name, pose=SE3(), color=kuka_orange):
     if not path.exists():
         raise FileNotFoundError(f"Mesh not found: {path}")
     return [sg.Mesh(str(path), pose=pose, color=color)]
+
+def collision_mesh(name, pose=SE3()):
+    path = coll_loc / (name + ".stl")
+    if not path.exists():
+        raise FileNotFoundError(f"Collision mesh not found: {path}")
+    return [sg.Mesh(str(path), pose=pose)]
+
+def lifter_collision(lifter_pose):
+    # Turn the lifter boxes into cuboids placed relative to the last link.
+    boxes = []
+    for x0, x1, y0, y1, z0, z1 in lifter_boxes:
+        size = np.array([x1 - x0, y1 - y0, z1 - z0]) * lifter_scale
+        centre = np.array([x0 + x1, y0 + y1, z0 + z1]) / 2 * lifter_scale
+        boxes.append(sg.Cuboid(size, pose=lifter_pose * SE3(*centre)))
+    return boxes
 
 class KukaKR300:
     def __init__(self):
@@ -48,8 +74,12 @@ class KukaKR300:
         for i, link in enumerate(self.Robot.links):
             color = dark_grey if i == 5 else kuka_orange
             link.geometry = mesh(f"link_{i + 1}", T_mesh[i + 1].inv(), color)
+            # Collision STLs share the visual meshes' frame, so they use the same pose.
+            link.collision = collision_mesh(f"link_{i + 1}", T_mesh[i + 1].inv())
         #Adding the base that the robot will be mounted on
         self.base_mesh = mesh("base_link", self.Robot.base, dark_grey)[0]
+        # The base doesn't move with any link; move it with base_collision.T alongside base_mesh.T.
+        self.base_collision = collision_mesh("base_link", self.Robot.base)[0]
 
         lifter_pose = flange * SE3(0, 0, lifter_flange_z)
         self.lifter = sg.Mesh(
@@ -60,10 +90,22 @@ class KukaKR300:
         )
         last_link = self.Robot.links[-1]
         last_link.geometry = list(last_link.geometry) + [self.lifter]
+        last_link.collision = list(last_link.collision) + lifter_collision(lifter_pose)
         self.Robot.tool = lifter_pose
 
         self.qr = np.array([0, -np.pi/2, np.pi/2, 0, np.pi/2, 0])
         self.Robot.q = self.qr
+
+    def collides(self, q, obstacles):
+        # True if the robot (including the lifter) at joint angles q hits any obstacle.
+        return any(self.Robot.iscollided(q, obstacle) for obstacle in obstacles)
+
+    def path_collides(self, path, obstacles):
+        # Index of the first colliding step in a list of joint angles, or None if the path is clear.
+        for i, q in enumerate(path):
+            if self.collides(q, obstacles):
+                return i
+        return None
 
 def move_joint(robot, angle, joint):
     q = robot.Robot.q.copy()
