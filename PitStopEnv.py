@@ -16,57 +16,56 @@ from pathlib import Path
 
 from KukaRobot.KukaKR300 import KukaKR300
 from irb140.ABB_irb140 import ABBIRB140
-from Staubli.Lucas_robot import Lucasbot
+from Staubli.Staubli import Staubli
 
-CAR_DIR = Path(__file__).resolve().parent / "Car"
+Car_dir = Path(__file__).resolve().parent / "Car"
 
 # W07.STL and Wheel.STL share units; a 39 unit wheel is a 660 mm F1 tyre
-MESH_TO_M = 0.66 / 39.0
+Mesh_to_m = 0.66 / 39.0
 
 # Landmarks measured on W07.STL (mesh units, Y up, nose along +X, Z across)
-CAR_CENTRE = np.array([141.2, 0.0, 500.0])  # ground, midway between axles
-FRONT_HUB_X = 239.9
-REAR_HUB_X = 42.5
-HUB_Y = 19.5
-HUB_FACE_Z = {"front": 39.0, "rear": 38.0}  # hub face offset from centreline
-JACK_POINT = np.array([285.0, 7.0, 500.0])  # underside of the nose
+Car_centre = np.array([141.2, 0.0, 500.0])  # ground, midway between axles
+Front_hub_x = 239.9
+Rear_hub_x = 42.5
+Hub_y = 19.5
+Hub_face_z = {"front": 39.0, "rear": 38.0}  # hub face offset from centreline
+Jack_point = np.array([285.0, 7.0, 500.0])  # underside of the nose
 
 # Wheel.STL: axis along +Z, inner face at z=0, nut seat at z~22, outer face z=23
-WHEEL_CENTRE_XY = 19.5
-NUT_SEAT_Z = 22.0
-WHEEL_OUTER_Z = 23.0
-NUT_LENGTH = 0.06
-NUT_RADIUS = 0.04
+Wheel_centre_xy = 19.5
+Nut_seat_z = 22.0
+Wheel_outer_z = 23.0
+Nut_length = 0.025  # WheelNut.STL: mm, base face at z=0, 25 mm long
 
-CAR_SILVER = [0.75, 0.77, 0.80, 1.0]
-TYRE_BLACK = [0.08, 0.08, 0.08, 1.0]
-NEW_TYRE = [0.35, 0.05, 0.05, 1.0]  # tinted so the fresh tyre stands out
-STAND_GREY = [0.55, 0.55, 0.6, 1.0]
-NUT_RED = [0.85, 0.1, 0.1, 1.0]
-TOOL_GREY = [0.3, 0.3, 0.3, 1.0]
-DARK_GREY = [0.2, 0.2, 0.2, 1.0]
-FLOOR_GREY = [0.35, 0.35, 0.38, 1.0]
+Car_silver = [0.75, 0.77, 0.80, 1.0]
+Tyre_black = [0.08, 0.08, 0.08, 1.0]
+New_tyre = [0.35, 0.05, 0.05, 1.0]  # tinted so the fresh tyre stands out
+Stand_grey = [0.55, 0.55, 0.6, 1.0]
+Nut_red = [0.85, 0.1, 0.1, 1.0]
+Tool_grey = [0.3, 0.3, 0.3, 1.0]
+Dark_grey = [0.2, 0.2, 0.2, 1.0]
+Floor_grey = [0.35, 0.35, 0.38, 1.0]
 
 # Wheel being changed: front right (car -y side, where the ABB and Staubli stand)
-WORK_WHEEL = "FR"
+Work_wheel = "FR"
 WHEELS = {"FL": ("front", 1), "FR": ("front", -1),
           "RL": ("rear", 1), "RR": ("rear", -1)}
 
 # Front-end lift, pivoting about the rear axle (~70 mm at the front wheels)
-LIFT_PITCH = np.deg2rad(1.2)
+Lift_pitch = np.deg2rad(1.2)
 
 # Kuka stands off the front-left corner, not in front of the nose
-KUKA_BASE_XY = (3.7, 1.9)
+Kuka_base_xy = (3.7, 1.9)
 
 # Tools: tool frame at the tip, z pointing out of the flange
-KUKA_TOOL_LENGTH = 0.45  # Kuka flange faces along -z6
-ABB_TOOL_LENGTH = 0.18
-LUCAS_TOOL_LENGTH = 0.10
+Kuka_tool_length = 0.45  # Kuka flange faces along -z6
+Abb_tool_length = 0.078  # Facom 19 mm socket length
+Staubli_tool_length = 0.10
 
 # Tyre stands beside the Staubli (offsets from its base); wheels lie flat on top
-STAND_HEIGHT = 0.25
-STAND_RADIUS = 0.3
-STAND_OFFSETS = {"old": (-0.55, -0.1), "new": (-0.1, -0.65)}
+Stand_height = 0.25
+Stand_radius = 0.3
+Stand_offsets = {"old": (-0.55, -0.1), "new": (-0.1, -0.65)}
 
 DT = 0.02
 STEPS = 50
@@ -74,22 +73,22 @@ STEPS = 50
 
 def mesh_point(p):
     """Convert a W07.STL point (mesh units) into the car frame (metres)."""
-    d = (np.asarray(p, dtype=float) - CAR_CENTRE) * MESH_TO_M
+    d = (np.asarray(p, dtype=float) - Car_centre) * Mesh_to_m
     return np.array([d[0], -d[2], d[1]])
 
 
 # Car frame: x forward, y left, z up; mesh Y-up is rotated to Z-up
-CAR_MESH_POSE = SE3.Rx(np.pi/2) * SE3(*(-CAR_CENTRE * MESH_TO_M))
-WHEEL_MESH_POSE = SE3(-WHEEL_CENTRE_XY * MESH_TO_M, -WHEEL_CENTRE_XY * MESH_TO_M, 0)
-NUT_POSE = SE3(0, 0, NUT_SEAT_Z * MESH_TO_M + NUT_LENGTH / 2)
-JACK_POSE = SE3(mesh_point(JACK_POINT)) * SE3.Ry(-np.pi/2)  # tool z into the nose
-REAR_PIVOT = mesh_point([REAR_HUB_X, HUB_Y, CAR_CENTRE[2]])
+Car_mesh_pose = SE3.Rx(np.pi/2) * SE3(*(-Car_centre * Mesh_to_m))
+Wheel_mesh_pose = SE3(-Wheel_centre_xy * Mesh_to_m, -Wheel_centre_xy * Mesh_to_m, 0)
+Nut_pose = SE3(0, 0, Nut_seat_z * Mesh_to_m)  # nut mesh base on the seat
+Jack_pose = SE3(mesh_point(Jack_point)) * SE3.Ry(-np.pi/2)  # tool z into the nose
+Rear_pivot = mesh_point([Rear_hub_x, Hub_y, Car_centre[2]])
 
 
 def hub_pose(axle, side):
     """Hub face frame in the car frame, z pointing outboard. side: +1 left, -1 right."""
-    x = FRONT_HUB_X if axle == "front" else REAR_HUB_X
-    p = mesh_point([x, HUB_Y, CAR_CENTRE[2] - side * HUB_FACE_Z[axle]])
+    x = Front_hub_x if axle == "front" else Rear_hub_x
+    p = mesh_point([x, Hub_y, Car_centre[2] - side * Hub_face_z[axle]])
     return SE3(p) * SE3.Rx(-side * np.pi/2)
 
 
@@ -119,70 +118,70 @@ class PitStop:
         # --- Robots ---
         self.kuka = KukaKR300()
         self.abb = ABBIRB140()
-        self.lucas = Lucasbot()
-        kuka, abb, lucas = self.kuka.Robot, self.abb.Robot, self.lucas.Robot
+        self.staubli = Staubli()
+        kuka, abb, staubli = self.kuka.Robot, self.abb.Robot, self.staubli.Robot
 
-        front_hub = hub_pose(*WHEELS[WORK_WHEEL]).t
-        jack = JACK_POSE.t
-        kuka.base = facing(*KUKA_BASE_XY, jack)
+        front_hub = hub_pose(*WHEELS[Work_wheel]).t
+        jack = Jack_pose.t
+        kuka.base = facing(*Kuka_base_xy, jack)
         abb.base = SE3(front_hub[0] + 0.35, -1.6, 0) * SE3.Rz(np.pi/2)
-        lucas.base = SE3(front_hub[0] - 0.7, -1.75, 0) * SE3.Rz(np.pi/2)  # room to swing the wheel aside
-        for robot in (self.kuka, self.abb, self.lucas):
+        staubli.base = SE3(front_hub[0] - 0.7, -1.75, 0) * SE3.Rz(np.pi/2)  # room to swing the wheel aside
+        for robot in (self.kuka, self.abb, self.staubli):
             robot.base_mesh.T = robot.Robot.base.A
 
         # Jack fork, wheel gun and wheel gripper
-        add_tool(kuka, SE3(0, 0, -KUKA_TOOL_LENGTH) * SE3.Rx(np.pi), [
-            sg.Cuboid([0.12, 0.12, KUKA_TOOL_LENGTH], pose=SE3(0, 0, -KUKA_TOOL_LENGTH / 2), color=TOOL_GREY),
-            sg.Cuboid([0.03, 0.3, 0.2], pose=SE3(0, 0, -0.1), color=DARK_GREY)])
-        add_tool(abb, SE3(0, 0, ABB_TOOL_LENGTH), [
-            sg.Cylinder(0.045, ABB_TOOL_LENGTH - 0.04,
-                        pose=SE3(0, 0, -(ABB_TOOL_LENGTH + 0.04) / 2), color=TOOL_GREY),
-            sg.Cylinder(NUT_RADIUS + 0.008, 0.04, pose=SE3(0, 0, -0.02), color=DARK_GREY)])
-        add_tool(lucas, SE3(0, 0, LUCAS_TOOL_LENGTH), [
-            sg.Cylinder(0.035, LUCAS_TOOL_LENGTH,
-                        pose=SE3(0, 0, -LUCAS_TOOL_LENGTH / 2), color=TOOL_GREY),
-            sg.Cylinder(0.14, 0.02, pose=SE3(0, 0, -0.01), color=DARK_GREY)])
+        add_tool(kuka, SE3(0, 0, -Kuka_tool_length) * SE3.Rx(np.pi), [
+            sg.Cuboid([0.12, 0.12, Kuka_tool_length], pose=SE3(0, 0, -Kuka_tool_length / 2), color=Tool_grey),
+            sg.Cuboid([0.03, 0.3, 0.2], pose=SE3(0, 0, -0.1), color=Dark_grey)])
+        # Socket nut end at the tool tip, drive end on the flange
+        add_tool(abb, SE3(0, 0, Abb_tool_length), [
+            sg.Mesh(str(Path(__file__).resolve().parent / "irb140" / "Facom_NS19LA_19mm_socket.stl"),
+                    pose=SE3.Rx(np.pi), scale=[0.001] * 3, color=Dark_grey)])
+        add_tool(staubli, SE3(0, 0, Staubli_tool_length), [
+            sg.Cylinder(0.035, Staubli_tool_length,
+                        pose=SE3(0, 0, -Staubli_tool_length / 2), color=Tool_grey),
+            sg.Cylinder(0.14, 0.02, pose=SE3(0, 0, -0.01), color=Dark_grey)])
 
         self.kuka_home = self.kuka.qr
         self.abb_home = np.array([-np.pi/2, -np.pi/2, 0, 0, np.pi/2, 0])  # parked clear of the wheel
-        self.lucas_home = np.array([0, 0, np.pi/2, 0, np.pi/2, 0])
+        self.staubli_home = np.array([0, 0, np.pi/2, 0, np.pi/2, 0])
         kuka.q = self.kuka_home
         abb.q = self.abb_home
-        lucas.q = self.lucas_home
+        staubli.q = self.staubli_home
 
         # --- Car, wheels and wheel nut ---
-        self.floor = sg.Cuboid([12, 7, 0.01], pose=SE3(0.5, 0, -0.006), color=FLOOR_GREY)
-        self.car = sg.Mesh(str(CAR_DIR / "W07.STL"), scale=[MESH_TO_M] * 3, color=CAR_SILVER)
-        self.wheels = {name: sg.Mesh(str(CAR_DIR / "Wheel.STL"), scale=[MESH_TO_M] * 3, color=TYRE_BLACK) for name in WHEELS}
-        self.nut = sg.Cylinder(NUT_RADIUS, NUT_LENGTH, color=NUT_RED)
-        self.new_tyre = sg.Mesh(str(CAR_DIR / "Wheel.STL"), scale=[MESH_TO_M] * 3, color=NEW_TYRE)
+        self.floor = sg.Cuboid([12, 7, 0.01], pose=SE3(0.5, 0, -0.006), color=Floor_grey)
+        self.car = sg.Mesh(str(Car_dir / "W07.STL"), scale=[Mesh_to_m] * 3, color=Car_silver)
+        self.wheels = {name: sg.Mesh(str(Car_dir / "Wheel.STL"), scale=[Mesh_to_m] * 3, color=Tyre_black) for name in WHEELS}
+        self.nut = sg.Mesh(str(Car_dir / "WheelNut.STL"), scale=[0.001] * 3, color=Nut_red)
+        self.new_tyre = sg.Mesh(str(Car_dir / "Wheel.STL"), scale=[Mesh_to_m] * 3, color=New_tyre)
 
         # Stand tops: a wheel frame resting there has its inner face down, z up
-        lx, ly = lucas.base.t[:2]
-        self.stands = {name: SE3(lx + dx, ly + dy, STAND_HEIGHT) for name, (dx, dy) in STAND_OFFSETS.items()}
-        self.stand_shapes = [sg.Cylinder(STAND_RADIUS, STAND_HEIGHT,
-                                         pose=T * SE3(0, 0, -STAND_HEIGHT / 2), color=STAND_GREY) for T in self.stands.values()]
+        lx, ly = staubli.base.t[:2]
+        self.stands = {name: SE3(lx + dx, ly + dy, Stand_height) for name, (dx, dy) in Stand_offsets.items()}
+        self.stand_shapes = [sg.Cylinder(Stand_radius, Stand_height,
+                                         pose=T * SE3(0, 0, -Stand_height / 2), color=Stand_grey) for T in self.stands.values()]
 
         # Each prop follows a parent pose: (parent function, offset)
-        self.mounts = {"car": (self.car_pose, CAR_MESH_POSE)}
+        self.mounts = {"car": (self.car_pose, Car_mesh_pose)}
         for name, (axle, side) in WHEELS.items():
-            self.mounts[name] = (lambda a=axle, s=side: self.car_pose() * hub_pose(a, s), WHEEL_MESH_POSE)
-        self.mounts["nut"] = (lambda: self.hub_world(WORK_WHEEL), NUT_POSE)
-        self.mounts["new_tyre"] = (lambda: self.stands["new"], WHEEL_MESH_POSE)
+            self.mounts[name] = (lambda a=axle, s=side: self.car_pose() * hub_pose(a, s), Wheel_mesh_pose)
+        self.mounts["nut"] = (lambda: self.hub_world(Work_wheel), Nut_pose)
+        self.mounts["new_tyre"] = (lambda: self.stands["new"], Wheel_mesh_pose)
         self.props = {"car": self.car, "nut": self.nut, "new_tyre": self.new_tyre, **self.wheels}
 
         if env is not None:
             for shape in [self.floor, self.kuka.base_mesh, self.abb.base_mesh,
-                          self.lucas.base_mesh, *self.stand_shapes, *self.props.values()]:
+                          self.staubli.base_mesh, *self.stand_shapes, *self.props.values()]:
                 env.add(shape)
-            for robot in (kuka, abb, lucas):
+            for robot in (kuka, abb, staubli):
                 env.add(robot)
         self.render()
 
     # --- Scene state ---
     def car_pose(self):
         """Car frame in the world: pitched nose-up about the rear axle."""
-        return SE3(REAR_PIVOT) * SE3.Ry(-self.pitch) * SE3(-REAR_PIVOT)
+        return SE3(Rear_pivot) * SE3.Ry(-self.pitch) * SE3(-Rear_pivot)
 
     def hub_world(self, wheel):
         return self.car_pose() * hub_pose(*WHEELS[wheel])
@@ -225,9 +224,10 @@ class PitStop:
         self.move_joint(robot, self.solve(robot, T, robot.q), steps)
 
     def move_line(self, robot, T, steps=STEPS):
-        """Straight-line Cartesian move, solving IK at each step."""
-        for Ti in rtb.ctraj(robot.fkine(robot.q), T, steps):
-            robot.q = self.solve(robot, Ti, robot.q)
+        """Straight-line move: trapezoidal s(t) blends the position (Lab 4/6), IK at each step."""
+        start = robot.fkine(robot.q).t
+        for s in rtb.trapezoidal(0, 1, steps).q:
+            robot.q = self.solve(robot, SE3.Rt(T.R, (1 - s) * start + s * T.t), robot.q)
             self.render()
 
     def spin_tool(self, robot, angle, steps=STEPS):
@@ -242,7 +242,7 @@ class PitStop:
 
     # --- Pit stop ---
     def jack_target(self):
-        return self.car_pose() * JACK_POSE
+        return self.car_pose() * Jack_pose
 
     def set_lift(self, pitch, steps=STEPS):
         """Kuka holds the jack point while the car pitches with it."""
@@ -254,40 +254,40 @@ class PitStop:
 
     def nut_target(self):
         """Wheel gun tip on the nut face, pointing along the axle."""
-        return self.hub_world(WORK_WHEEL) * NUT_POSE * SE3(0, 0, NUT_LENGTH / 2) * SE3.Rx(np.pi)
+        return self.hub_world(Work_wheel) * Nut_pose * SE3(0, 0, Nut_length) * SE3.Rx(np.pi)
 
     def wheel_target(self):
         """Gripper plate on the wheel's outer face, pointing along the axle."""
-        return self.hub_world(WORK_WHEEL) * SE3(0, 0, WHEEL_OUTER_Z * MESH_TO_M) * SE3.Rx(np.pi)
+        return self.hub_world(Work_wheel) * SE3(0, 0, Wheel_outer_z * Mesh_to_m) * SE3.Rx(np.pi)
 
     def stand_target(self, stand):
         """Gripper plate on the outer face of a wheel lying on a stand."""
-        return self.stands[stand] * SE3(0, 0, WHEEL_OUTER_Z * MESH_TO_M) * SE3.Rx(np.pi)
+        return self.stands[stand] * SE3(0, 0, Wheel_outer_z * Mesh_to_m) * SE3.Rx(np.pi)
 
     def place_on_stand(self, name, stand):
         """Staubli lowers the wheel it holds onto a stand and lets go."""
-        lucas = self.lucas.Robot
-        self.move_to(lucas, self.stand_target(stand) * back(0.2))
-        self.move_line(lucas, self.stand_target(stand), 30)
+        staubli = self.staubli.Robot
+        self.move_to(staubli, self.stand_target(stand) * back(0.2))
+        self.move_line(staubli, self.stand_target(stand), 30)
         self.attach(name, lambda: self.stands[stand])
-        self.move_line(lucas, self.stand_target(stand) * back(0.2), 30)
+        self.move_line(staubli, self.stand_target(stand) * back(0.2), 30)
 
     def pick_from_stand(self, name, stand):
         """Staubli grips a wheel lying on a stand and lifts it clear."""
-        lucas = self.lucas.Robot
-        self.move_to(lucas, self.stand_target(stand) * back(0.2))
-        self.move_line(lucas, self.stand_target(stand), 30)
-        self.attach(name, self.ee(lucas))
-        self.move_line(lucas, self.stand_target(stand) * back(0.2), 30)
+        staubli = self.staubli.Robot
+        self.move_to(staubli, self.stand_target(stand) * back(0.2))
+        self.move_line(staubli, self.stand_target(stand), 30)
+        self.attach(name, self.ee(staubli))
+        self.move_line(staubli, self.stand_target(stand) * back(0.2), 30)
 
     def run(self):
-        kuka, abb, lucas = self.kuka.Robot, self.abb.Robot, self.lucas.Robot
-        hub = lambda: self.hub_world(WORK_WHEEL)
+        kuka, abb, staubli = self.kuka.Robot, self.abb.Robot, self.staubli.Robot
+        hub = lambda: self.hub_world(Work_wheel)
 
         print("Kuka KR300: jacking up the front of the car")
         self.move_to(kuka, self.jack_target() * back(0.3))
         self.move_line(kuka, self.jack_target(), 30)
-        self.set_lift(LIFT_PITCH)
+        self.set_lift(Lift_pitch)
 
         print("ABB IRB140: removing the wheel nut")
         self.move_to(abb, self.nut_target() * back(0.15))
@@ -298,19 +298,19 @@ class PitStop:
         self.move_joint(abb, self.abb_home)
 
         print("Staubli TX90: removing the old wheel")
-        self.move_to(lucas, self.wheel_target() * back(0.15))
-        self.move_line(lucas, self.wheel_target(), 30)
-        self.attach(WORK_WHEEL, self.ee(lucas))
-        self.move_line(lucas, self.wheel_target() * back(0.3))
-        self.place_on_stand(WORK_WHEEL, "old")
+        self.move_to(staubli, self.wheel_target() * back(0.15))
+        self.move_line(staubli, self.wheel_target(), 30)
+        self.attach(Work_wheel, self.ee(staubli))
+        self.move_line(staubli, self.wheel_target() * back(0.3))
+        self.place_on_stand(Work_wheel, "old")
 
         print("Staubli TX90: fitting the new tyre")
         self.pick_from_stand("new_tyre", "new")
-        self.move_to(lucas, self.wheel_target() * back(0.3))
-        self.move_line(lucas, self.wheel_target())
+        self.move_to(staubli, self.wheel_target() * back(0.3))
+        self.move_line(staubli, self.wheel_target())
         self.attach("new_tyre", hub)
-        self.move_line(lucas, self.wheel_target() * back(0.15), 30)
-        self.move_joint(lucas, self.lucas_home)
+        self.move_line(staubli, self.wheel_target() * back(0.15), 30)
+        self.move_joint(staubli, self.staubli_home)
 
         print("ABB IRB140: refitting the wheel nut")
         self.move_to(abb, self.nut_target() * back(0.2))

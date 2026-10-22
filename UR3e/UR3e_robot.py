@@ -94,7 +94,10 @@ class UR3eLollipop:
     def _segment_pose(self, a, b):
         # Align cylinder between two joint positions
         z = np.asarray(b) - np.asarray(a)
-        z = z / np.linalg.norm(z)
+        length = np.linalg.norm(z)
+        if length < 1e-10:
+            return SE3(*(np.asarray(a, dtype=float).tolist()))
+        z = z / length
 
         ref = [0, 0, 1] if abs(z[2]) < 0.9 else [0, 1, 0]
         x = np.cross(ref, z)

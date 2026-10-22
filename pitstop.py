@@ -1,87 +1,66 @@
 # Pit Stop Environment
 # 41013 Industrial Robotics - Lab Assignment 2
-# Purpose: Swift simulation of a Mercedes W07 tyre change.
-# Kuka KR300:  Lifts the front of the car.
-# ABB IRB140:  Removes and refits the wheel nut.
-# Staubli TX90: Removes the old front-right wheel and fits a new one.
 
 import numpy as np
-import roboticstoolbox as rtb
 import swift
-import spatialgeometry as sg
 from spatialmath import SE3
+
 from KukaRobot.KukaKR300 import KukaKR300
 from irb140.ABB_irb140 import ABBIRB140
-from Staubli.Lucas_robot import Staubli
-from Car.CarModel import CarModel
+from Staubli.Staubli import Staubli
 from UR3e.UR3e_robot import UR3eLollipop
+from Car.CarModel import CarModel
+from collision import CollisionManager
+from safety import Safety
+from controller_estop import ControllerEstop, A_button, B_button, X_button, Start_button
+from recovery import Recovery
 
-# Simulation speed.
-dt = 0.02
-steps = 50
-
-# Robot placement.
-Kuka_base_posXY = (3.7, 1.9)
-
-# Lengths of the tools attached to the robots.
-ARB_toolLength = 0.18
-
-# Wheel storage stands.
-standHeight = 0.25
-standRadius = 0.3
-standOffset = {
-    "old": (-0.55, -0.1),
-    "new": (-0.1, -0.65)
-}
-
-# Colours.
-tyre_stand_grey = [0.55, 0.55, 0.6, 1.0]
-floor_grey = [0.35, 0.35, 0.38, 1.0]
+from pitstop_config import dt, steps, Kuka_base_posXY
+from pitstop_utils import facing, MotionStopped
+from pitstop_scene import SceneMixin
+from pitstop_attachments import AttachmentMixin
+from pitstop_motion import MotionMixin
+from pitstop_gui import GUIMixin
+from pitstop_sequence import SequenceMixin
 
 
-# 2. SIMPLE POSITION FUNCTIONS
-
-def back(distance):
-    # Move backwards along the robot tool's axis.
-    return SE3(0, 0, -distance)
-
-
-def facing(x, y, target):
-    # Rotate a robot base so it faces a target point.
-    angle = np.arctan2(target[1] - y, target[0] - x)
-    return SE3(x, y, 0) * SE3.Rz(angle)
-
-
-# 3. CREATE THE PIT STOP
-
-class PitStop:
+class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin):
 
     def __init__(self, env):
         self.env = env
+        self.controller_estop = ControllerEstop(B_button)  # B button (1) = E-STOP
+        self.safety = Safety(self.controller_estop)
+        self.recovery = Recovery(self)
 
-        # Create the car and the three robots.
+        self.run_requested = False
+        self.reset_requested = False
+        self.jog_request = None
+        self.selected_robot = 0
+        self.active_robot = None
+
         self.car = CarModel()
         self.kuka = KukaKR300()
         self.abb = ABBIRB140()
-        self.lucas = Staubli()
+        self.staubli = Staubli()
         self.ur3e = UR3eLollipop()
+
+        self.collision_manager = CollisionManager()
 
         car = self.car
         kuka = self.kuka.Robot
         abb = self.abb.Robot
-        lucas = self.lucas.Robot
+        staubli = self.staubli.Robot
 
-        # Position the robots around the car.
+        # Robot positions
         front_hub = car.hub_pose("front", -1).t
         jack = car.jack_offset.t
 
         kuka.base = facing(Kuka_base_posXY[0], Kuka_base_posXY[1], jack)
         abb.base = SE3(front_hub[0] + 0.35, -1.6, 0) * SE3.Rz(np.pi / 2)
-        lucas.base = SE3(front_hub[0] - 0.7, -1.75, 0) * SE3.Rz(np.pi / 2)
+        staubli.base = SE3(front_hub[0] - 0.7, -1.75, 0) * SE3.Rz(np.pi / 2)
 
-        # UR3e stands beside the nose, away from the car's driving line.
+        # Lollipop marshal robot, positioned at the front of the pit box.
         self.ur3e.set_base(SE3(3.16, 1.16, 0.62))
-        # Approximate full-car clearance box, in metres.
         car_min_x = car.mesh_point([0, 0, car.centre[2]])[0]
         car_max_x = car.mesh_point([299.2, 0, car.centre[2]])[0]
         self.ur3e_car_box = (
@@ -89,311 +68,163 @@ class PitStop:
             np.array([car_max_x - car_min_x, 1.90, 1.16])
         )
 
-        # Move the base meshes into the same positions.
         self.kuka.base_mesh.T = kuka.base.A
         self.abb.base_mesh.T = abb.base.A
-        self.lucas.base_mesh.T = lucas.base.A
+        self.staubli.base_mesh.T = staubli.base.A
 
-
-        # Starting positions of the robots.
+        # Home positions
         self.kuka_home = self.kuka.qr.copy()
-        self.abb_home = np.array([-np.pi / 2, -np.pi / 2, 0, 0, np.pi / 2, 0])
-        self.lucas_home = np.array([0, 0, np.pi / 2, 0, np.pi / 2, 0])
+        # Hand-picked ABB park pose: arm tucked back so the Staubli can reach the wheel past it.
+        self.abb_home = np.deg2rad([-90, -60, 30, 0, 90, 0])
+        self.staubli_home = np.array([0, 0, np.pi / 2, 0, np.pi / 2, 0])
 
         kuka.q = self.kuka_home.copy()
         abb.q = self.abb_home.copy()
-        lucas.q = self.lucas_home.copy()
+        staubli.q = self.staubli_home.copy()
 
-        # Create the floor.
-        self.floor = sg.Cuboid(
-            [12, 7, 0.01],
-            pose=SE3(0.5, 0, -0.006),
-            color=floor_grey
-        )
+        self.build_floor_and_stands()
 
-        # Create stands next to the Staubli.
-        lx = lucas.base.t[0]
-        ly = lucas.base.t[1]
-        self.stands = {}
-        self.stand_shapes = []
+        self.setup_attachments()
+        self.collision_manager.extra_obstacles = self.all_extra_obstacles
+        self.collision_manager.robots = [staubli, kuka, abb]
 
-        for name in standOffset:
-            dx, dy = standOffset[name]
-            stand_pose = SE3(lx + dx, ly + dy, standHeight)
-            self.stands[name] = stand_pose
+        self.build_obstacle_and_curtain()
 
-            stand_shape = sg.Cylinder(
-                standRadius,
-                standHeight,
-                pose=stand_pose * SE3(0, 0, -standHeight / 2),
-                color=tyre_stand_grey
-            )
-            self.stand_shapes.append(stand_shape)
-
-        # Store each object's parent and its position relative to that parent.
-        self.mounts = {}
-        self.mounts["car"] = ("car", car.body_offset)
-
-        for name in car.wheels:
-            self.mounts[name] = ("hub_" + name, car.wheel_offset)
-
-        self.mounts["nut"] = ("hub_" + car.work_wheel, car.nut_offset)
-        self.mounts["new_wheel"] = ("stand_new", car.wheel_offset)
-
-        self.props = {
-            "car": car.body,
-            "nut": car.nut,
-            "new_wheel": car.new_wheel
-        }
-        self.props.update(car.wheel_meshes)
-
-        # Place every object before adding it, so nothing appears at the origin.
         self.update_props()
 
-        # Add all objects and robots to Swift.
-        if self.env is not None:
-            self.env.add(self.floor)
-            self.env.add(self.kuka.base_mesh)
-            self.env.add(self.abb.base_mesh)
-            self.env.add(self.lucas.base_mesh)
+        self.add_to_env()
 
-            for shape in self.stand_shapes:
-                self.env.add(shape)
-
-            for shape in self.props.values():
-                self.env.add(shape)
-
-            self.env.add(kuka)
-            self.env.add(abb)
-            self.env.add(lucas)
-            self.ur3e.add_to_env(self.env)
-
+        self.add_gui()
         self.render()
-
-    # 4. OBJECT POSITIONS AND ATTACHMENT
-
-    def parent_pose(self, parent):
-        # Find the position of whichever object a part is attached to.
-        if parent == "car":
-            return self.car.pose()
-
-        if parent == "stand_old":
-            return self.stands["old"]
-
-        if parent == "stand_new":
-            return self.stands["new"]
-
-        if parent == "kuka":
-            return self.kuka.Robot.fkine(self.kuka.Robot.q)
-
-        if parent == "abb":
-            return self.abb.Robot.fkine(self.abb.Robot.q)
-
-        if parent == "lucas":
-            return self.lucas.Robot.fkine(self.lucas.Robot.q)
-
-        # For example, "hub_FR" refers to the front-right wheel hub.
-        if parent.startswith("hub_"):
-            wheel = parent[4:]
-            return self.car.hub_world(wheel)
-
-        raise ValueError("Unknown attachment: " + parent)
-
-    def prop_pose(self, name):
-        # Find the current world position of an object.
-        parent, offset = self.mounts[name]
-        return self.parent_pose(parent) * offset
-
-    def attach(self, name, new_parent):
-        # Attach an object to a new parent without making it jump.
-        old_position = self.prop_pose(name)
-        new_position = self.parent_pose(new_parent)
-        offset = new_position.inv() * old_position
-        self.mounts[name] = (new_parent, offset)
-
-    def update_props(self):
-        # Move all objects to match the latest robot and car positions.
-        for name in self.props:
-            self.props[name].T = self.prop_pose(name).A
 
     def render(self):
         self.update_props()
         self.ur3e.update()
+        self.recovery.record()
+        self.safety.poll()
+
+        self.status.label = f"STATE: {self.safety.state}"
+
+        if self.safety.reason:
+            self.status.label += f" | {self.safety.reason}"
 
         if self.env is not None:
-            self.env.step(dt)
+            self.env.step(.03 if self.safety.state == "RECOVERING" else dt)
+
+    # Reset / jog / run
+
+    def reset_scene(self):
+        # Controller E-stop recovery for the demo is intentionally simple:
+        # GUI RESET restores the simulation to stage 0.
+        self.kuka.Robot.q = self.kuka_home.copy()
+        self.abb.Robot.q = self.abb_home.copy()
+        self.staubli.Robot.q = self.staubli_home.copy()
+        self.ur3e.q = self.ur3e.q_home.copy()
+        self.ur3e.update()
+        self.car.pitch = 0.0
+        self.mounts = dict(self.initial_mounts)
+        self.clear_obstacle()
+        self.active_robot = None
+        self.recovery.history.clear()
+        self.recovery.signature = None
+        self.recovery.recording = False
+        self.recovery.pending = False
+        self.recovery.complete = False
+        self.run_requested = False
+        self.jog_request = None
+        self.safety.recovery_requested = False
+        # Never clear a held emergency-stop input.
+        if not self.controller_estop.pressed():
+            self.safety.state = "READY"
+            self.safety.reason = ""
+        else:
+            self.safety.stop("ESTOP", "Release B before starting")
+        self.update_props()
 
     def move_lollipop(self, target):
-        # Check clearance before moving the UR3e through its joint path.
+        """Move the UR3e in checked steps; B or X interrupts each step."""
         path = self.ur3e.checked_path(
             target, self.ur3e_car_box,
-            (self.kuka.Robot, self.abb.Robot, self.lucas.Robot)
+            (self.kuka.Robot, self.abb.Robot, self.staubli.Robot)
         )
-        for q in path:
-            self.ur3e.q = q.copy()
-            self.render()
+        self.active_robot = "ur3e"
+        try:
+            for q in path:
+                self.guard()
+                self.ur3e.q = q.copy()
+                self.render()
+        finally:
+            self.active_robot = None
 
-    # 5. ROBOT MOVEMENT
+    def jog_selected(self):
+        dx, dy, dz = self.jog_request
+        self.jog_request = None
 
-    def solve(self, robot, target, starting_q):
-        # Find joint angles that position the tool at a target.
-        solution = robot.ikine_LM(
-            target,
-            q0=starting_q,
-            joint_limits=True,
-            seed=0
+        robot = self.robot_list()[self.selected_robot]
+
+        target = (
+            SE3(dx, dy, dz)
+            * robot.fkine(robot.q)
         )
 
-        if not solution.success:
-            raise RuntimeError(robot.name + ": no IK solution for\n" + str(target))
+        if not self.safety.start():
+            return
+        self.recovery.begin()
 
-        # Choose the nearest equivalent joint angles where limits allow.
-        q = starting_q + (solution.q - starting_q + np.pi) % (2 * np.pi) - np.pi
-        lower, upper = robot.qlim
+        try:
+            self.move_to(robot, target, 25)
 
-        for i in range(len(q)):
-            if q[i] < lower[i] or q[i] > upper[i]:
-                q[i] = solution.q[i]
+        except MotionStopped:
+            return
 
-        return q
+        self.safety.state = "READY"
 
-    def move_joint(self, robot, goal, steps=steps):
-        # Smoothly move the joints to their target angles.
-        path = rtb.jtraj(robot.q, goal, steps)
-
-        for q in path.q:
-            robot.q = q
-            self.render()
-
-    def move_to(self, robot, target, steps=steps):
-        # Find the required joint angles, then move to them.
-        goal = self.solve(robot, target, robot.q)
-        self.move_joint(robot, goal, steps)
-
-    def move_line(self, robot, target, steps=steps):
-        # Move the tool along a straight line using inverse kinematics.
-        start = robot.fkine(robot.q)
-        path = rtb.ctraj(start, target, steps)
-
-        for position in path:
-            robot.q = self.solve(robot, position, robot.q)
-            self.render()
-
-    def spin_tool(self, robot, angle, steps=steps):
-        # Rotate the last joint to loosen or tighten the wheel nut.
-        starting_q = robot.q.copy()
-        goal = starting_q.copy()
-
-        lower = robot.qlim[0, -1]
-        upper = robot.qlim[1, -1]
-
-        if goal[-1] + angle < lower or goal[-1] + angle > upper:
-            angle = -angle
-
-        goal[-1] = goal[-1] + angle
-        self.move_joint(robot, goal, steps)
-
-    # 6. LIFTING THE CAR
-
-    def set_lift(self, pitch, steps=steps):
-        # Slowly lift or lower the car while Kuka follows the jack point.
-        kuka = self.kuka.Robot
-        start_pitch = self.car.pitch
-
-        for angle in np.linspace(start_pitch, pitch, steps):
-            self.car.pitch = angle
-            kuka.q = self.solve(kuka, self.car.jack_target(), kuka.q)
-            self.render()
-
-    # 7. PICKING UP AND PUTTING DOWN wheels
-
-    def place_on_stand(self, name, stand):
-        lucas = self.lucas.Robot
-        target = self.car.wheel_target(self.stands[stand])
-
-        # Approach, place the wheel, release it, and move away.
-        self.move_to(lucas, target * back(0.2))
-        self.move_line(lucas, target, 30)
-        self.attach(name, "stand_" + stand)
-        self.move_line(lucas, target * back(0.2), 30)
-
-    def pick_from_stand(self, name, stand):
-        lucas = self.lucas.Robot
-        target = self.car.wheel_target(self.stands[stand])
-
-        # Approach the wheel, grip it, and move away.
-        self.move_to(lucas, target * back(0.2))
-        self.move_line(lucas, target, 30)
-        self.attach(name, "lucas")
-        self.move_line(lucas, target * back(0.2), 30)
-
-    # 8. RUN THE FULL PIT STOP
+    def recover_scene(self):
+        """Retrace recorded frames after B is released; does not resume AUTO."""
+        if self.safety.state != "ESTOP" or self.controller_estop.pressed():
+            return
+        if len(self.recovery.history) <= 1:
+            self.safety.reason = "No recorded recovery path; use X for full reset"
+            return
+        self.recovery.recording = False
+        self.safety.state = "RECOVERING"
+        self.safety.reason = "Recorded reverse recovery"
+        try:
+            self.recovery.reverse()
+        except MotionStopped:
+            print("Recovery interrupted; stopped in place")
 
     def run(self):
-        car = self.car
-        kuka = self.kuka.Robot
-        abb = self.abb.Robot
-        lucas = self.lucas.Robot
+        if self.recovery.complete and not self.recovery.pending:
+            self.safety.reason = "Cycle complete: RESET then START to recover before a new task"
+            return
+        if not self.safety.start():
+            return
 
-        # UR3e extends the lollipop in front of the car before the tyre change.
-        print("UR3e: holding the lollipop in front of the car")
-        self.move_lollipop(self.ur3e.q_hold)
+        try:
+            if self.recovery.pending:
+                self.recovery.reverse()
+            else:
+                self.recovery.begin()
+                self.transit_index = 0
+                try:
+                    self.run_sequence()
+                finally:
+                    self.transit_index = None
+                self.recovery.complete = True
 
-        # STEP 1: Kuka lifts the front of the car.
-        print("Kuka KR300: jacking up the front of the car")
-        self.move_to(kuka, car.jack_target() * back(0.3))
-        self.move_line(kuka, car.jack_target(), 30)
-        self.set_lift(car.lift_pitch)
+        except MotionStopped:
+            if self.recovery.pending:
+                print("AUTO stopped. Release the controller E-stop, then use RESET to return to stage 0.")
+            else:
+                print("Stopped in place.")
+            return
 
-        # STEP 2: ABB removes the wheel nut.
-        print("ABB IRB140: removing the wheel nut")
-        self.move_to(abb, car.nut_target() * back(0.15))
-        self.move_line(abb, car.nut_target(), 30)
-        self.attach("nut", "abb")
-        self.spin_tool(abb, -2 * np.pi)
-        self.move_line(abb, car.nut_target() * back(0.2), 30)
-        self.move_joint(abb, self.abb_home)
+        self.safety.state = "READY"
+        self.safety.reason = ""
 
-        # STEP 3: Staubli removes the old wheel.
-        print("Staubli TX90: removing the old wheel")
-        self.move_to(lucas, car.wheel_target() * back(0.15))
-        self.move_line(lucas, car.wheel_target(), 30)
-        self.attach(car.work_wheel, "lucas")
-        self.move_line(lucas, car.wheel_target() * back(0.3))
-        self.place_on_stand(car.work_wheel, "old")
+        print("System READY")
 
-        # STEP 4: Staubli picks up and fits the new wheel.
-        print("Staubli TX90: fitting the new tyre")
-        self.pick_from_stand("new_wheel", "new")
-        self.move_to(lucas, car.wheel_target() * back(0.3))
-        self.move_line(lucas, car.wheel_target())
-        self.attach("new_wheel", "hub_" + car.work_wheel)
-        self.move_line(lucas, car.wheel_target() * back(0.15), 30)
-        self.move_joint(lucas, self.lucas_home)
-
-        # STEP 5: ABB refits the wheel nut.
-        print("ABB IRB140: refitting the wheel nut")
-        self.move_to(abb, car.nut_target() * back(0.2))
-        self.move_line(abb, car.nut_target(), 30)
-        self.spin_tool(abb, 2 * np.pi)
-        self.attach("nut", "hub_" + car.work_wheel)
-        self.move_line(abb, car.nut_target() * back(0.15), 30)
-        self.move_joint(abb, self.abb_home)
-
-        # The wheel change is complete; raise the lollipop before car release.
-        print("UR3e: raising the lollipop out of the car's path")
-        self.move_lollipop(self.ur3e.q_home)
-
-        # STEP 6: Kuka lowers the car.
-        print("Kuka KR300: lowering the car")
-        self.set_lift(0.0)
-        self.move_line(kuka, car.jack_target() * back(0.3), 30)
-        self.move_joint(kuka, self.kuka_home)
-
-        print("Pit stop complete")
-
-
-# 9. START THE SIMULATION
 
 if __name__ == "__main__":
     env = swift.Swift()
@@ -401,7 +232,46 @@ if __name__ == "__main__":
 
     pit_stop = PitStop(env)
 
-    input("Press enter to start the pit stop")
-    pit_stop.run()
+    print("Controller: Start = START AUTO | B = E-STOP | A = RECOVERY | X = FULL RESET")
 
-    env.hold()
+    try:
+        while True:
+            pit_stop.safety.poll()
+
+            # Start (6): begin only from READY.
+            if pit_stop.controller_estop.pressed_once(Start_button) and pit_stop.safety.state == "READY":
+                pit_stop.run_requested = True
+                print("Controller Start: START AUTO")
+
+            # A (0): retrace recorded motion only after B has been released.
+            if pit_stop.controller_estop.pressed_once(A_button) and pit_stop.safety.state == "ESTOP":
+                pit_stop.safety.recovery_requested = True
+
+            # X (2) is polled by safety.poll(), including during robot motion.
+            # Reset itself happens here once motion has stopped.
+
+            if pit_stop.reset_requested or pit_stop.safety.reset_requested:
+                pit_stop.reset_requested = False
+                pit_stop.safety.reset_requested = False
+                pit_stop.reset_scene()
+
+            if pit_stop.safety.recovery_requested:
+                pit_stop.safety.recovery_requested = False
+                pit_stop.recover_scene()
+
+            if (
+                pit_stop.jog_request
+                and
+                pit_stop.safety.state == "READY"
+            ):
+                pit_stop.jog_selected()
+
+            if pit_stop.run_requested or pit_stop.safety.start_requested:
+                pit_stop.run_requested = False
+                pit_stop.safety.start_requested = False
+                pit_stop.run()
+
+            pit_stop.render()
+
+    except KeyboardInterrupt:
+        pass

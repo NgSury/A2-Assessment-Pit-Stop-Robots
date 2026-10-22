@@ -26,13 +26,9 @@ class CarModel:
     nut_seat = 22.0
     wheel_outer_z = 23.0
     # Wheel nut mesh (WheelNut.STL, M12x1.5 19 mm hex): drawn in mm, axis along +Z,
-    # base face at z=0, 25 mm long, 22 mm across the corners.
-    # Scaled up so the hex is 100 mm across the flats and easy to see in the sim.
-    # The ABB socket uses the same size_up so it still fits.
-    nut_size_up = 100 / 19
-    nut_scale = 0.001 * nut_size_up
-    nut_length = 0.025 * nut_size_up
-    nut_radius = 0.011 * nut_size_up
+    # base face at z=0, 25 mm long.
+    nut_scale = 0.001
+    nut_length = 0.025
 
     # Colours.
     silver = [0.75, 0.77, 0.80, 1.0]
