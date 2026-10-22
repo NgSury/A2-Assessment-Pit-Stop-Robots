@@ -9,8 +9,8 @@ def back(distance):
 
 def facing(x, y, target):
     # gives a pose on the floor at (x, y) facing the target point (target_x, target_y)
-    angle - np.arctan2(target[1] - y, target[0] - x)
-    return SE3(x, y, 0) * SE3.Rz(np.angle)
+    angle = np.arctan2(target[1] - y, target[0] - x)
+    return SE3(x, y, 0) * SE3.Rz(angle)
 
 def motion_stopped (Exeption):
     #used when a motion is stopped when a safety system is triggered

@@ -1,7 +1,7 @@
 import numpy as np
 from spatialmath import SE3
 from swift import Slider, Button, Label
-from pitstop_util import back
+from pitstop_config import sequence_transits
 
 class PitStopGUI:
     
@@ -13,7 +13,7 @@ class PitStopGUI:
             self.abb.robot
         ]
     #makes the sliders for the GUI
-    def select_robot(self, robot):
+    def select_robot(self, value):
         self.selected_robot = int(value)
         robot = self.robot_list()[self.selected_robot]
         
