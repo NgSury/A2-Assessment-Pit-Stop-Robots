@@ -102,4 +102,4 @@ def equipment():
 def build_pit_lane():
     """All pit lane shapes, positioned around this scene's pit box at the origin."""
     return (lane_and_markings() + pit_box() + pit_wall()
-            + garages() + gantry() + equipment_and_crew())
+            + garages() + gantry() + equipment())
