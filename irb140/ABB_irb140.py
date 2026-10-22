@@ -91,7 +91,7 @@ class ABBIRB140:
             )
 
         # attach the 19mm impact socket directly to joint 6.
-        attachment_path = Path(__file__).resolve().parent / "Facom_NS19LA_19mm_socket_SIMULATION.stl"
+        attachment_path = Path(__file__).resolve().parent / "Facom_NS19LA_19mm_socket.stl"
 
         #joint 6's local z axis is the outward wrist axis
         attachment = sg.Mesh(
