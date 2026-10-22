@@ -11,14 +11,23 @@ from spatialmath import SE3
 from pathlib import Path
 
 #Mesh files
-MESH_DIR = Path(__file__).resolve().parent / "kr300_r2700_2" / "visual"
-KUKA_ORANGE = [1.0, 0.36, 0.0, 1.0]
-DARK_GREY = [0.2, 0.2, 0.2, 1.0]
+mech_loc = Path(__file__).resolve().parent / "kr300_r2700_2" / "visual"
+kuka_orange = [1.0, 0.36, 0.0, 1.0]
+dark_grey = [0.2, 0.2, 0.2, 1.0]
+lift_colour = [0.3, 0.3, 0.3, 1.0]
 
-Q_MESH = np.array([0, -np.pi/2, np.pi/2, 0, 0, 0])
+q_mesh = np.array([0, -np.pi/2, np.pi/2, 0, 0, 0])
 
-def mesh(name, pose=SE3(), color=KUKA_ORANGE):
-    path = MESH_DIR / (name + ".dae")
+# Front wing lifter end effector
+lifter_stl = Path(__file__).resolve().parent / "front_wing_lifter_ASSEMBLED.stl"
+lifter_scale = 0.001
+lifter_flange_z = 0.450
+
+#flipping the lifter to match the robot's flange orientation
+flange = SE3.Rx(np.pi)
+
+def mesh(name, pose=SE3(), color=kuka_orange):
+    path = mech_loc / (name + ".dae")
     if not path.exists():
         raise FileNotFoundError(f"Mesh not found: {path}")
     return [sg.Mesh(str(path), pose=pose, color=color)]
@@ -35,13 +44,23 @@ class KukaKR300:
         ]
         self.Robot = rtb.DHRobot(links, name='Kuka KR300')
 
-        # Attach each mesh by undoing its link frame at the export pose
-        T_mesh = self.Robot.fkine_all(Q_MESH)
+        T_mesh = self.Robot.fkine_all(q_mesh)
         for i, link in enumerate(self.Robot.links):
-            color = DARK_GREY if i == 5 else KUKA_ORANGE
+            color = dark_grey if i == 5 else kuka_orange
             link.geometry = mesh(f"link_{i + 1}", T_mesh[i + 1].inv(), color)
+        #Adding the base that the robot will be mounted on
+        self.base_mesh = mesh("base_link", self.Robot.base, dark_grey)[0]
 
-        self.base_mesh = mesh("base_link", self.Robot.base, DARK_GREY)[0]
+        lifter_pose = flange * SE3(0, 0, lifter_flange_z)
+        self.lifter = sg.Mesh(
+            str(lifter_stl),
+            pose=lifter_pose,
+            scale=[lifter_scale] * 3,
+            color=lift_colour
+        )
+        last_link = self.Robot.links[-1]
+        last_link.geometry = list(last_link.geometry) + [self.lifter]
+        self.Robot.tool = lifter_pose
 
         self.qr = np.array([0, -np.pi/2, np.pi/2, 0, np.pi/2, 0])
         self.Robot.q = self.qr
@@ -79,8 +98,6 @@ if __name__ == "__main__":
         sliders.append(slider)
         env.add(slider)
 
-    # Reset button: callbacks run inside env.step, so just flag the request
-    # and animate the move from the main loop below
     reset_requested = [False]
     env.add(Button(cb=lambda _: reset_requested.__setitem__(0, True), desc="reset"))
 

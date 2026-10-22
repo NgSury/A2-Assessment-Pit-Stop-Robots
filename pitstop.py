@@ -23,7 +23,6 @@ steps = 50
 Kuka_base_posXY = (3.7, 1.9)
 
 # Lengths of the tools attached to the robots.
-Kuka_toolLength = 0.45
 ARB_toolLength = 0.18
 Lucas_toolLength = 0.10
 
@@ -37,8 +36,8 @@ standOffset = {
 
 # Colours.
 tyre_stand_grey = [0.55, 0.55, 0.6, 1.0]
-tool_grey = [0.3, 0.3, 0.3, 1.0] #if stl files for kuka end eff found remove
-dark_grey = [0.2, 0.2, 0.2, 1.0] #if stl files for kuka end eff found remove
+tool_grey = [0.3, 0.3, 0.3, 1.0]
+dark_grey = [0.2, 0.2, 0.2, 1.0]
 floor_grey = [0.35, 0.35, 0.38, 1.0]
 
 
@@ -96,21 +95,6 @@ class PitStop:
         self.abb.base_mesh.T = abb.base.A
         self.lucas.base_mesh.T = lucas.base.A
 
-        # Add a jack to the Kuka.
-        kuka_tool = SE3(0, 0, -Kuka_toolLength) * SE3.Rx(np.pi)
-        kuka_shapes = [
-            sg.Cuboid(
-                [0.12, 0.12, Kuka_toolLength],
-                pose=SE3(0, 0, -Kuka_toolLength / 2),
-                color=tool_grey
-            ),
-            sg.Cuboid(
-                [0.03, 0.3, 0.2],
-                pose=SE3(0, 0, -0.1),
-                color=dark_grey
-            )
-        ]
-        add_tool(kuka, kuka_tool, kuka_shapes)
 
         # Add a wheel-nut tool to the ABB.
         abb_tool = SE3(0, 0, ARB_toolLength)
