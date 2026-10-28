@@ -48,8 +48,12 @@ class CarModel:
     # The car tilts slightly when the front is lifted.
     lift_pitch = np.deg2rad(1.2)
 
-    def __init__(self):
+    def __init__(self, paint=silver):
         self.pitch = 0.0
+        # Where the car is driving on the track; identity = parked in the pit box.
+        self.drive = SE3()
+        self.steer = 0.0  # front wheel steering angle
+        self.spin = 0.0   # wheel roll angle
 
         # Offsets of each mesh from its parent frame.
         # The car STL is Y-up. Rotate it into the Swift Z-up world.
@@ -65,7 +69,7 @@ class CarModel:
         self.rear_pivot = self.mesh_point([self.rearHub_x, self.axel_y, self.centre[2]])
 
         # Meshes: body, four wheels, the work wheel's nut and the replacement wheel.
-        self.body = self.make_mesh("W07.STL", self.silver)
+        self.body = self.make_mesh("W07.STL", paint)
         self.wheel_meshes = {name: self.make_mesh("Wheel.STL", self.tyre_black) for name in self.wheels}
         self.nut = sg.Mesh(str(self.folder / "WheelNut.STL"), scale=[self.nut_scale] * 3, color=self.nut_red)
         self.new_wheel = self.make_mesh("Wheel.STL", self.new_tyre_red)
@@ -88,12 +92,25 @@ class CarModel:
 
     def pose(self):
         # Tilt the car around the rear axle when lifting its front.
-        return SE3(self.rear_pivot) * SE3.Ry(-self.pitch) * SE3(-self.rear_pivot)
+        return self.drive * SE3(self.rear_pivot) * SE3.Ry(-self.pitch) * SE3(-self.rear_pivot)
 
     def hub_world(self, wheel):
         # Find the wheel hub's position in the world.
         axle, side = self.wheels[wheel]
         return self.pose() * self.hub_pose(axle, side)
+
+    def wheel_frame(self, wheel):
+        # Hub frame turned by the steering (front wheels) and rolled about the axle.
+        # Hub y points up on the right side and down on the left, hence -side.
+        axle, side = self.wheels[wheel]
+        steer = self.steer if axle == "front" else 0.0
+        return self.hub_world(wheel) * SE3.Ry(-side * steer) * SE3.Rz(side * self.spin)
+
+    def roll_to(self, drive, steer=0.0):
+        # Drive the car to a new pose, rolling its wheels by the distance covered.
+        self.spin += np.linalg.norm(drive.t - self.drive.t) / (self.wheel_centre * self.mesh_conv)
+        self.drive = drive
+        self.steer = steer
 
     def jack_target(self):
         return self.pose() * self.jack_offset

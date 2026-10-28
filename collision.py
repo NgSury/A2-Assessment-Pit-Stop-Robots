@@ -189,20 +189,41 @@ class CollisionManager:
         return True
 
     def random_obstacle_pose(self, robot, path, obstacle_size, keep_clear=(), others=(), rng=None):
-        """Put the obstacle around the tool tip at a random point 30-70% along the path.
-        It must block the path, but not touch the robot's start or goal, the other
-        robots (others: list of (robot, q)) or come near the task targets (keep_clear)."""
-        rng = rng or np.random.default_rng()
+        """Choose a box that actually intersects a moving robot link on this path.
+
+        The earlier tool-tip-only search missed most links, because collision checks
+        use link centre-line segments rather than the rendered tool mesh.  Sample
+        actual link midpoints instead, and verify that the collision manager sees
+        the candidate while the start/goal and other robots remain clear.
+        """
+        if len(path) < 3:
+            return None
         start, goal = path[0], path[-1]
-        for k in rng.permutation(np.arange(int(.3 * len(path)), int(.7 * len(path)) + 1)):
-            pose = SE3(robot.fkine(path[k]).t)
-            if any(np.linalg.norm(pose.t - p) < .45 for p in keep_clear):
-                continue
-            if any(self.check(r, pose, obstacle_size, q)[0]
-                   for r, q in [(robot, start), (robot, goal), *others]):
-                continue
-            if not self.path_clear(robot, path, pose, obstacle_size):
-                return pose
+        middle = range(max(1, int(.2 * len(path))), min(len(path) - 1, int(.8 * len(path)) + 1))
+        for k in middle:
+            points = get_link_points(robot, path[k])
+            # Prioritize the longer moving arm links, not the tool-tip point.
+            segments = sorted(
+                zip(points[:-1], points[1:]),
+                key=lambda ab: np.linalg.norm(ab[1] - ab[0]), reverse=True
+            )
+            for a, b in segments:
+                if np.linalg.norm(b - a) < max(obstacle_size) * 1.5:
+                    continue
+                for fraction in (.5, .35, .65):
+                    centre = a + fraction * (b - a)
+                    # Keep the visible box above the scene floor.
+                    if centre[2] - obstacle_size[2] / 2 < 0.02:
+                        continue
+                    pose = SE3(centre)
+                    if any(np.linalg.norm(centre - pt) < .45 for pt in keep_clear):
+                        continue
+                    if any(self.check(r, pose, obstacle_size, q)[0]
+                           for r, q in [(robot, start), (robot, goal), *others]):
+                        continue
+                    # Confirm a future point on the path collides with this box.
+                    if not self.path_clear(robot, path, pose, obstacle_size):
+                        return pose
         return None
 
     def random_extra_obstacles(self, robot, path, size, count, keep_clear=(), avoid=(), others=(), existing=(), clear=.7):

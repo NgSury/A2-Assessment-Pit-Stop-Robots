@@ -5,7 +5,6 @@ import numpy as np
 from spatialmath import SE3
 from swift import Slider, Button, Label
 
-from pitstop_config import sequence_transits
 
 
 class GUIMixin:
@@ -50,6 +49,23 @@ class GUIMixin:
         if self.safety.state in ("READY", "RECOVERY_READY"):
             self.run_requested = True
 
+    def request_recovery(self, _=None):
+        # Match controller A: queue recovery for the main loop, rather than
+        # moving the simulation directly inside a Swift GUI callback.
+        if self.safety.state not in ("ESTOP", "CURTAIN_STOP"):
+            print("Recovery only available after an E-STOP or light-curtain stop")
+            return
+        if self.safety.light_curtain_broken:
+            self.safety.reason = "Clear the light curtain before recovery"
+            print(self.safety.reason)
+            return
+        if self.controller_estop.pressed():
+            self.safety.reason = "Release controller B before recovery"
+            print(self.safety.reason)
+            return
+        self.safety.recovery_requested = True
+        print("GUI recovery requested: reverse recorded motion")
+
     # Demo obstacle
 
     def place_obstacle(self, _=None):
@@ -57,9 +73,9 @@ class GUIMixin:
             print("RESET before arming the obstacle")
             return
         self.clear_obstacle()
-        # It drops onto a random transit of the next run (see MotionMixin.drop_random_obstacle).
-        self.obstacle_drop_at = int(np.random.randint(1, sequence_transits + 1))
-        print("Obstacle armed: it will appear in a random robot's path during the next run")
+        # Arm the first safe, eligible movement; the motion code validates the drop.
+        self.obstacle_drop_at = 1
+        print("Obstacle IN armed. Press START: obstacle will appear on the first eligible robot path.")
 
     def clear_obstacle(self, _=None):
         self.obstacle_drop_at = None
@@ -73,10 +89,14 @@ class GUIMixin:
     # Safety
 
     def trigger_light_curtain(self, _=None):
-        self.safety.stop(
-            "FAULT",
-            "Light curtain broken"
-        )
+        self.safety.break_light_curtain()
+        self.run_requested = False
+        self.jog_request = None
+        print("GUI: light curtain BREAK triggered")
+
+    def clear_light_curtain(self, _=None):
+        self.safety.clear_light_curtain()
+        print("GUI: light curtain CLEAR triggered")
 
     # GUI setup
 
@@ -86,6 +106,12 @@ class GUIMixin:
 
         self.status = Label(desc="STATE: READY")
         self.env.add(self.status)
+
+        # Race: bring the silver car in before START
+        self.race_status = Label(desc=self.driver.status())
+        self.env.add(self.race_status)
+        self.env.add(Button(cb=self.request_pit, desc="Pit now"))
+        self.env.add(Button(cb=self.request_leave, desc="Leave pit"))
 
         # One button per robot chooses which robot the sliders and jog buttons move.
         for i, name in enumerate(["Staubli TX90", "KUKA KR300", "ABB IRB140"]):
@@ -146,6 +172,10 @@ class GUIMixin:
                 desc="E-STOP"
             ),
             Button(
+                cb=self.request_recovery,
+                desc="RECOVER TO SAFE STATE"
+            ),
+            Button(
                 cb=lambda _: setattr(self, "reset_requested", True),
                 desc="RESET"
             ),
@@ -159,7 +189,11 @@ class GUIMixin:
             ),
             Button(
                 cb=self.trigger_light_curtain,
-                desc="Trigger light curtain"
+                desc="LIGHT CURTAIN BREAK"
+            ),
+            Button(
+                cb=self.clear_light_curtain,
+                desc="LIGHT CURTAIN CLEAR"
             )
         ]
 

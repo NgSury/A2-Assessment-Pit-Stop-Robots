@@ -13,6 +13,7 @@ from Car.CarModel import CarModel
 from collision import CollisionManager
 from safety import Safety
 from controller_estop import ControllerEstop, A_button, B_button, X_button, Start_button
+from controller_camera import ControllerCamera
 from recovery import Recovery
 
 from pitstop_config import dt, steps, Kuka_base_posXY
@@ -22,13 +23,16 @@ from pitstop_attachments import AttachmentMixin
 from pitstop_motion import MotionMixin
 from pitstop_gui import GUIMixin
 from pitstop_sequence import SequenceMixin
+from pitstop_race import RaceMixin
 
 
-class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin):
+class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin, RaceMixin):
 
     def __init__(self, env):
         self.env = env
         self.controller_estop = ControllerEstop(B_button)  # B button (1) = E-STOP
+        # Sticks / ZL / ZR / Y move the Swift view; shares the same joystick
+        self.camera = ControllerCamera(env, self.controller_estop)
         self.safety = Safety(self.controller_estop)
         self.recovery = Recovery(self)
 
@@ -91,6 +95,9 @@ class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin)
 
         self.build_obstacle_and_curtain()
 
+        # Silver car starts out racing; "Pit now" brings it into the box
+        self.setup_race()
+
         self.update_props()
 
         self.add_to_env()
@@ -99,6 +106,8 @@ class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin)
         self.render()
 
     def render(self):
+        step = .03 if self.safety.state == "RECOVERING" else dt
+        self.race_step(step)
         self.update_props()
         self.ur3e.update()
         self.recovery.record()
@@ -109,8 +118,14 @@ class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin)
         if self.safety.reason:
             self.status.label += f" | {self.safety.reason}"
 
+        if self.race_status.desc != self.driver.status():
+            self.race_status.desc = self.driver.status()
+            print(self.race_status.desc)
+
+        self.camera.update(step)
+
         if self.env is not None:
-            self.env.step(.03 if self.safety.state == "RECOVERING" else dt)
+            self.env.step(step)
 
     # Reset / jog / run
 
@@ -134,8 +149,12 @@ class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin)
         self.run_requested = False
         self.jog_request = None
         self.safety.recovery_requested = False
+        # Reset cannot authorize motion while a light curtain is obstructed.
+        # The intrusion is controlled by LIGHT CURTAIN CLEAR, not RESET.
         # Never clear a held emergency-stop input.
-        if not self.controller_estop.pressed():
+        if self.safety.light_curtain_broken:
+            self.safety.stop("CURTAIN_STOP", "Light curtain interrupted - clear before recovery")
+        elif not self.controller_estop.pressed():
             self.safety.state = "READY"
             self.safety.reason = ""
         else:
@@ -182,7 +201,11 @@ class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin)
 
     def recover_scene(self):
         """Retrace recorded frames after B is released; does not resume AUTO."""
-        if self.safety.state != "ESTOP" or self.controller_estop.pressed():
+        if (
+            self.safety.state not in ("ESTOP", "CURTAIN_STOP")
+            or self.controller_estop.pressed()
+            or self.safety.light_curtain_broken
+        ):
             return
         if len(self.recovery.history) <= 1:
             self.safety.reason = "No recorded recovery path; use X for full reset"
@@ -198,6 +221,9 @@ class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin)
     def run(self):
         if self.recovery.complete and not self.recovery.pending:
             self.safety.reason = "Cycle complete: RESET then START to recover before a new task"
+            return
+        if not self.car_in_box():
+            self.safety.reason = "Car is still on track: press Pit now first"
             return
         if not self.safety.start():
             return
@@ -230,10 +256,15 @@ class PitStop(SceneMixin, AttachmentMixin, MotionMixin, GUIMixin, SequenceMixin)
 if __name__ == "__main__":
     env = swift.Swift()
     env.launch(realtime=True)
+    # Swift waits this long (s) for the browser to load each shape; the default 20 s
+    # is tight for the car STL once the full race track is in the scene.
+    env._ir_support_mount_timeout = 60.0
 
     pit_stop = PitStop(env)
 
+    print("Press 'Pit now' to bring the silver car into its box, then START.")
     print("Controller: Start = START AUTO | B = E-STOP | A = RECOVERY | X = FULL RESET")
+    print("Camera: left stick = orbit | right stick = pan | ZL/ZR = zoom | Y = reset view")
 
     try:
         while True:

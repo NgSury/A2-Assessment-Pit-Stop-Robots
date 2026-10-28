@@ -68,12 +68,14 @@ class SceneMixin:
                     )
                 )
 
-        # The OBJ files are split by material because STL doesn't retain colour
-        # and Swift/SpatialGeometry can render separate meshes with explicit colours.
+        # The button is split into one mesh per colour because STL doesn't retain
+        # colour and Swift/SpatialGeometry can render separate meshes with explicit
+        # colours. STL copies of the OBJ parts are used: Swift never finishes
+        # loading .obj files, so env.add() times out on them.
         mesh_dir = Path(__file__).resolve().parent / 'Assets' / 'EmergencyStop'
         button_pose = SE3(centre_x, centre_y, table_height)
         self.estop_button_shapes = [
-            sg.Mesh(str(mesh_dir / f'Emergency_stop_{name}.obj'),
+            sg.Mesh(str(mesh_dir / f'Emergency_stop_{name}.stl'),
                     pose=button_pose, color=color)
             for name, color in (
                 ('gray', [0.40, 0.42, 0.46, 1]),
@@ -130,8 +132,10 @@ class SceneMixin:
         if self.env is None:
             return
 
+        # Large meshes go in before the ~660 track boxes: once the browser is busy
+        # with the track, a big STL like W07 can miss Swift's mount timeout.
         objects = [
-            *self.pit_lane,
+            *self.red_car_meshes,
             self.kuka.base_mesh,
             self.abb.base_mesh,
             self.staubli.base_mesh,
@@ -151,3 +155,6 @@ class SceneMixin:
             self.env.add(obj)
 
         self.ur3e.add_to_env(self.env)
+
+        for obj in [*self.pit_lane, *self.race_track]:
+            self.env.add(obj)

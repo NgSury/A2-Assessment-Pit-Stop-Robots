@@ -8,13 +8,28 @@ class Safety:
         self.reset_requested = False
         self.start_requested = False
         self.recovery_requested = False
+        self.light_curtain_broken = False
 
     def stop(self, state, reason):
         self.state = state
         self.reason = reason
         print(f"{state}: {reason}")
 
+    def break_light_curtain(self):
+        self.light_curtain_broken = True
+        # A real E-stop takes precedence if both conditions occur.
+        if self.state != "ESTOP":
+            self.stop("CURTAIN_STOP", "Light curtain interrupted - clear before recovery")
+
+    def clear_light_curtain(self):
+        self.light_curtain_broken = False
+        if self.state == "CURTAIN_STOP":
+            self.reason = "Light curtain clear - press RECOVER TO SAFE STATE"
+        print("Light curtain clear; restart inhibited until recovery")
+
     def reset(self):
+        if self.light_curtain_broken:
+            return False
         if self.state not in ("RUNNING", "RECOVERING"):
             self.state = "READY"
             self.reason = ""
@@ -23,7 +38,7 @@ class Safety:
         return False
 
     def start(self):
-        if self.state == "READY":
+        if self.state == "READY" and not self.light_curtain_broken:
             self.state = "RUNNING"
             self.reason = ""
             return True

@@ -39,7 +39,8 @@ class AttachmentMixin:
         if parent == "staubli":
             return self.staubli.Robot.fkine(self.staubli.Robot.q)
         if parent.startswith("hub_"):
-            return self.car.hub_world(parent[4:])
+            # Turns and rolls with the wheel while the car is driving
+            return self.car.wheel_frame(parent[4:])
 
         raise ValueError("Unknown attachment: " + parent)
 

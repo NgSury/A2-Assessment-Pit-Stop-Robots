@@ -49,7 +49,7 @@ class MotionMixin:
         if self.safety.state in ("RUNNING", "RECOVERING"):
             return
         # Preserve history after a stop, for A-button reverse recovery.
-        if self.safety.state in ("ESTOP", "FAULT", "COLLISION"):
+        if self.safety.state in ("ESTOP", "CURTAIN_STOP", "FAULT", "COLLISION"):
             self.recovery.recording = False
             self.run_requested = False
         raise MotionStopped
@@ -145,8 +145,8 @@ class MotionMixin:
     # Random obstacle and avoidance
 
     def drop_random_obstacle(self, robot, path):
-        # Obstacle IN arms one drop onto a randomly chosen transit (joint move) of the
-        # pit stop sequence. If no good spot is found there, it tries the next transit.
+        # Obstacle IN selects the first transit where the collision manager can
+        # prove the visible obstacle would intersect the moving robot's path.
         if self.transit_index is None or self.obstacle_drop_at is None:
             return
         self.transit_index += 1
@@ -160,6 +160,7 @@ class MotionMixin:
         pose = self.collision_manager.random_obstacle_pose(
             robot, path, self.obstacle_size, keep_clear, others)
         if pose is None:
+            print(f"Obstacle IN: no safe blocking position on transit {self.transit_index}; trying next transit")
             return
 
         self.obstacle_drop_at = None

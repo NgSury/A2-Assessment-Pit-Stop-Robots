@@ -31,8 +31,9 @@ def place(x, y, z):
     return SE3(x - Pit_box_x, y - Pit_y, z)
 
 
-def box(size, x, y, z, color):
-    return sg.Cuboid(size, pose=place(x, y, z), color=color)
+def box(size, x, y, z, color, yaw=0.0):
+    # yaw turns the box about the vertical axis (used by the curved track pieces)
+    return sg.Cuboid(size, pose=place(x, y, z) * SE3.Rz(yaw), color=color)
 
 
 def cylinder(radius, length, x, y, z, color):
@@ -67,10 +68,11 @@ def pit_box():
 
 
 def pit_wall():
-    # Wall between the pit lane and the race track (the +y side)
+    # Wall between the pit lane and the race track (the +y side). It ends at
+    # x = 25, where the pit exit (race_track.pit_exit) turns back onto the track.
     return [
-        box([38.0, 0.30, 0.9], 34, -30.8, 0.45, barrier),
-        box([38.0, 0.13, 0.14], 34, -30.8, 0.96, dark),
+        box([10.0, 0.30, 0.9], 20, -30.8, 0.45, barrier),
+        box([10.0, 0.13, 0.14], 20, -30.8, 0.96, dark),
     ]
 
 
